@@ -14,6 +14,7 @@ import test from 'node:test'
 
 import { createHandlers, createRuntime } from '../index.js'
 import { createDispatch, LEGACY_PREFIX, PREFIX } from '../lib/routes.js'
+import { requireRealLibrary } from './_lib-guard.mjs'
 
 // 数据目录隔离：POST /config 会写 settings.json，不能污染用户真实配置。
 const SANDBOX_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-http-'))
@@ -440,7 +441,7 @@ test('apply()：挂前缀 + 注册三个模型工具', async () => {
   assert.equal(rt.config.purge.level, 'full')
 })
 
-test('POST /forge：NSFW tag 全部被词表认领，不再报「不在库里」', async () => {
+test('POST /forge：NSFW tag 全部被词表认领，不再报「不在库里」', async (t) => {
   const nsfw = [
     'hand_on_own_breast', 'spread_legs', 'nakadashi', 'squirting', 'face_sitting',
     'biting_lip', 'gripping_sheets', 'desk_lamp', 'nude', 'on_back',
@@ -455,7 +456,8 @@ test('POST /forge：NSFW tag 全部被词表认领，不再报「不在库里」
   await rt.tags.ready()
   const indexStats = rt.tags.stats()
   assert.ok(indexStats.overlayFiles.length >= 1, '包内 overlay 没读到：' + JSON.stringify(indexStats.sourceFiles))
-  assert.ok(indexStats.loaded > 1000, '索引只有 seed：' + indexStats.loaded)
+  // CI / 干净机器上没有 Danbooru 大词表（只有 seed 540），这条用例是拿真库断言的，跳过
+  if (!requireRealLibrary(t, indexStats)) return
   const server = http.createServer(createDispatch(createHandlers(rt), rt.log))
   await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
   const base = 'http://127.0.0.1:' + portOf(server) + PREFIX
