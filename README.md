@@ -70,7 +70,8 @@ lib/spi.js              扩展注册表
 lib/routes.js           路由与 dispatch（含 /* 通配）
 lib/poses.js            姿势目录与缩略图查找
 server/standalone.mjs   脱离 DSH 的独立服务（静态资源 no-cache + ETag）
-server/shims.mjs        独立模式最小 ctx（端点逻辑委托 lib/cordis/adapter.js）
+server/shims.mjs        纯 Cordis 生命周期垫片（createContext + 8 个传输层名字再导出，2.2KB）
+lib/cordis/host.js      独立模式的 ctx 与 llm/webServer/tools 传输层实现（原 shims.mjs 正文）
 server/public/          Web 面板静态资源：panel.css / api.js / state.js / render.js / settings.js / history.js / app.js
 scripts/                run-tests.mjs / check-tags.mjs / bench.mjs / build-tags.mjs / push-to-github.ps1
 scripts/win/            Windows 启停脚本（根目录 .cmd/.vbs 只是转发）
@@ -127,6 +128,30 @@ R="C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe"
 CI 跑同样的三道门禁（`check:tags` → `typecheck` → `test`），配置在 `.github/workflows/ci.yml`，
 windows-latest + Node 20，步骤直接调上面这些 npm 脚本。
 
+## 发布包里有什么（npm pack）
+
+`package.json` 的 `files` 是白名单，只打这些：
+
+```
+index.js  client.js  client/  lib/  server/  data/  locale/  types/  icon.svg  README.md
+```
+
+- **不含** `tests/`、`scripts/`（门禁与推送脚本）、`docs/`、`tools/`（开发期工具）、`cordis.patch.yml`。
+- 自检：`npm pack --dry-run`（本机没有 npm 时，用宿主自带的 Electron 跑一份下载好的 npm-cli.js，见下）。
+  当前 102 个文件 / 232.2 kB tarball / 712.3 kB 解包（含 `lib/tags/matcher/` 六个子模块、`server/public/i18n.js`、`lib/cordis/host.js`）。
+- 为什么 `cordis.patch.yml` 不进包：它是**写给 `~/.dsh/profiles/<profile>/` 的样例补丁**，装进 node_modules 也不会被 DSH 读；
+  安装照本文开头「装法」直接写 profile 里的 patch 就行。
+
+本机没有 `node`/`npm` 时的打包自检：
+
+```bash
+mkdir -p /tmp/npmcli && cd /tmp/npmcli
+curl -sSL --ssl-no-revoke -o npm.tgz https://registry.npmjs.org/npm/-/npm-10.9.2.tgz && tar xzf npm.tgz
+cd "/d/DSh tagger"
+ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe" \
+  /tmp/npmcli/package/bin/npm-cli.js pack --dry-run
+```
+
 ## 装了哪两个 profile
 
 | profile | 包 | 前缀 | 备注 |
@@ -176,6 +201,7 @@ set "DSH_TAGGER_MODEL=deepseek-chat"
 | `/about` | 信息页：健康状态、数据目录、接口清单 |
 | `/tagger/api/*` | 全部 HTTP 接口（旧 `/prompt-forge/api/*` 同样可用） |
 | `/tagger/api/mcp` | MCP JSON-RPC 端点 |
+| `/tagger/api/locale?lang=zh` | 语言包：`{ ok, locale, langs, dict }`，与 `locale/<lang>.json` 同一份；桌面面板的文案也从这里取，不再硬编码 |
 
 ## 命令行独立跑（不用 DSH）
 
