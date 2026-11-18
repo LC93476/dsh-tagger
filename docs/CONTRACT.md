@@ -285,7 +285,8 @@ window.__ModuleLoader__.load({
   名字白名单 `/^client\/[a-z0-9][a-z0-9-]*\.js$/`（只一层，不许子目录/大写/反斜杠），其余 `400 bad-module`，缺文件 `404 no-module`。
 - `client.js` 门面：`factory` 里 `const mod = await import(base + "client/panel.js")`，**React 显式传进去**：
   `mod.create({ React, ctx, apiPrefix, locale })`。子模块是纯 ESM，禁止裸 import（拿不到 React）、禁止顶层 await。
-- 基址顺序：`globalThis.__DSH_TAGGER_MODBASE__`（测试用 `file://.../client/`）→ `/tagger/api/_mod/` → 失败再试 `/prompt-forge/api/_mod/`。
+- 基址顺序：`globalThis.__DSH_TAGGER_MODBASE__`（测试用 `file://.../client/`）→ `/tagger/api/_mod/client/` → 失败再试 `/prompt-forge/api/_mod/client/`。
+  **注意末尾的 `client/` 段不能省**：路由白名单要求路径是 `client/<名字>.js`，写成 `/_mod/panel.js` 会被宿主判 `400 bad-module`。
 - **加载失败不许把插件弄成 failed**：整块 try/catch，失败只注册一张极简错误卡（错误 message + 「重启宿主」提示），
   `apply` 照常返回。宿主判 failed 会导致整个面板入口消失，比没有子模块糟糕得多。
 - `slots.inject/register` 是同步注册语义：先 `await` 到组件，再在 `apply` 里同步注册，不要把注册写在 await 之后。
@@ -304,13 +305,15 @@ window.__ModuleLoader__.load({
 node scripts/check-tags.mjs
 
 # 全量测试（本机没有 node 时用 Electron 当 node）
-ELECTRON_RUN_AS_NODE=1 "<DeepSeek Harness.exe>" --test tests/*.test.mjs
+ELECTRON_RUN_AS_NODE=1 "<DeepSeek Harness.exe>" --test --test-concurrency=1 tests/*.test.mjs
 
 # 静态类型检查（不进构建，只查）
 npx tsc --noEmit -p tsconfig.json
 ```
 
 三道门禁与 `.github/workflows/ci.yml` 一一对应（CI 是 windows-latest，与开发机一致）。
+
+**测试必须串行跑**（`--test-concurrency=1`）：deliverable 里有几个套件会读同一份默认词表目录，进程并行时可能撞上另一个进程正在重写 overlay，表现为偶发 1 条失败（单跑必绿）。这不是业务 bug，但不许在门禁里并行。
 
 `tsconfig.json` 是 `allowJs` + `checkJs` + `noEmit`：改的是 JS，检查的是错误用法（拼错的字段、传错参数）。
 

@@ -15,7 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { createTagIndex } from '../lib/tags.js'
 import { detectPoseHints } from '../lib/zh-intent.js'
 
@@ -23,16 +23,28 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const poseFile = path.join(here, '..', 'data', 'tags', 'pose-view.jsonl')
 const danbooruGeneral = 'D:/QUARK/dsh-comfyui-workbench/data/danbooru/general.jsonl'
 const silent = { info() {}, warn() {}, error() {} }
-const scratch = path.join(os.tmpdir(), 'dsh-tagger-tags-pose-test-' + process.pid)
+// 同上：mkdtemp 保证目录唯一、结束即删，避免进程号被复用后读到上一轮的残留词表
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-tagger-tags-pose-test-'))
+after(() => {
+  fs.rmSync(scratch, { recursive: true, force: true })
+})
 
 // overlay 只读插件自带 data/tags + <scratch>/tags，不探测本机真实数据（快、可复现）
 const index = createTagIndex({ dir: scratch, logger: silent, probeDefaults: false })
+
+/** 姿势词表用例的守卫：公开版不带 data/tags/pose-view.jsonl 就 skip，别当成失败。 */
+function needPoseFile(t) {
+  if (fs.existsSync(poseFile)) return true
+  t.skip('本机没有姿势词表：' + poseFile)
+  return false
+}
 
 function top(term, limit = 5) {
   return index.search(term, { limit })
 }
 
-test('overlay 生效：中文「跪趴」命中 all_fours', async () => {
+test('overlay 生效：中文「跪趴」命中 all_fours', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   const rows = top('跪趴')
   assert.ok(rows.length > 0, 'search 没结果')
@@ -40,18 +52,21 @@ test('overlay 生效：中文「跪趴」命中 all_fours', async () => {
   assert.equal(rows[0].cn, '四肢着地（跪趴）')
 })
 
-test('「仰视」「俯视」分别命中 from_below / from_above', async () => {
+test('「仰视」「俯视」分别命中 from_below / from_above', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   assert.equal(top('仰视')[0].tag, 'from_below')
   assert.equal(top('俯视')[0].tag, 'from_above')
 })
 
-test('「过肩」命中 over_shoulder', async () => {
+test('「过肩」命中 over_shoulder', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   assert.equal(top('过肩')[0].tag, 'over_shoulder')
 })
 
-test('口语别名同样可查：从下面看 / 从上往下 / 屁股翘起来', async () => {
+test('口语别名同样可查：从下面看 / 从上往下 / 屁股翘起来', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   assert.equal(top('从下面看')[0].tag, 'from_below')
   assert.equal(top('从上往下')[0].tag, 'from_above')
@@ -59,14 +74,16 @@ test('口语别名同样可查：从下面看 / 从上往下 / 屁股翘起来',
   assert.ok(butt.some(row => row.tag === 'arched_back'), 'arched_back 没进结果：' + butt.map(row => row.tag).join(','))
 })
 
-test('体位词也可查：女上位 / 后入 / 过肩镜头之外的常用说法', async () => {
+test('体位词也可查：女上位 / 后入 / 过肩镜头之外的常用说法', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   assert.ok(top('女上位').some(row => row.tag === 'cowgirl_position'), '缺 cowgirl_position')
   assert.ok(top('后入').some(row => row.tag === 'sex_from_behind'), '缺 sex_from_behind')
   assert.ok(top('深喉').some(row => row.tag === 'deepthroat'), '缺 deepthroat')
 })
 
-test('口语别名回归：贴在墙上 / 对着镜头 也能落到库里的 tag', async () => {
+test('口语别名回归：贴在墙上 / 对着镜头 也能落到库里的 tag', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   assert.equal(top('贴在墙上')[0].tag, 'against_wall')
   assert.equal(top('贴在墙')[0].tag, 'against_wall')
@@ -74,7 +91,8 @@ test('口语别名回归：贴在墙上 / 对着镜头 也能落到库里的 tag
   assert.equal(top('看镜头')[0].tag, 'looking_at_viewer')
 })
 
-test('意图识别出的 tag 都能在索引里查到（词表与短语表联动）', async () => {
+test('意图识别出的 tag 都能在索引里查到（词表与短语表联动）', async t => {
+  if (!needPoseFile(t)) return
   await index.ready()
   for (const said of ['跪趴', '从下面看', '过肩', '仰视']) {
     for (const item of detectPoseHints(said)) {
@@ -91,6 +109,7 @@ test('词表里每个 tag 都真实存在于 danbooru 数据（库不存在则�
     t.skip('没有本机 danbooru 数据：' + danbooruGeneral)
     return
   }
+  if (!needPoseFile(t)) return
   const wanted = new Set()
   for (const line of fs.readFileSync(poseFile, 'utf8').split(/\r?\n/)) {
     if (line.trim() === '') continue

@@ -3,9 +3,10 @@
 `client.js` 只是门面（classic script，无构建）；面板实现全在这里，纯 ESM、无顶层 await、不裸 import React。
 
 ## 宿主要求
-子模块由宿主按 `GET {PREFIX}/_mod/<name>.js` 提供（PREFIX = `/tagger/api`，旧前缀 `/prompt-forge/api` 也挂一份），
-`content-type: text/javascript; charset=utf-8`、`Cache-Control: no-store`，name 只允许 `/^[a-z0-9][a-z0-9-]*\.js$/`
-（只认本目录根下这一层，没带子目录）。测试用 `globalThis.__DSH_TAGGER_MODBASE__` 喂 `file://` 基址绕过 HTTP。
+子模块由宿主按 `GET {PREFIX}/_mod/client/<name>.js` 提供（PREFIX = `/tagger/api`，旧前缀 `/prompt-forge/api` 也挂一份），
+`content-type: text/javascript; charset=utf-8`、`Cache-Control: no-store`。**路径里的 `client/` 段不能省**：
+宿主白名单是 `/^client\/[a-z0-9][a-z0-9-]*\.js$/`，漏了就 400 `bad-module`（只认本目录根下这一层，没带子目录）。
+测试用 `globalThis.__DSH_TAGGER_MODBASE__` 喂 `file://` 基址绕过 HTTP。
 
 ## 模块契约
 | 文件 | 导出 |
@@ -26,7 +27,7 @@
 函数第一行按需解构，DOM 结构与 testid 与拆分前逐字一致。
 
 ## 门面装载顺序
-1. `globalThis.__DSH_TAGGER_MODBASE__`（测试注入）→ 2. `/tagger/api/_mod/` → 3. `/prompt-forge/api/_mod/`。
+1. `globalThis.__DSH_TAGGER_MODBASE__`（测试注入）→ 2. `/tagger/api/_mod/client/` → 3. `/prompt-forge/api/_mod/client/`。
 成功即把模块对象缓存进 `globalThis.__DSH_TAGGER_MODS__`，下次 apply 同步注册（宿主 HMR / 二次挂载不会重复 await）。
 三个基址全失败时降级渲染 `data-testid="ptf-load-error"` 错误卡，插件不标 failed。
 

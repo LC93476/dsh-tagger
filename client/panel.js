@@ -6,6 +6,36 @@ import { apiUrl, imageSrc, readAsDataUrl, requestJson } from './api.js'
 import { createIcon } from './icon.js'
 import { shell } from './view-shell.js'
 
+/**
+ * SPI 计数：describe() 的 slots / hooks 是**对象**（{ 槽位: [{id,label}] } / { 钩子: [id] }），
+ * 老服务端或测试夹具可能直接给数字。三种形状都要数对，别把对象 Number() 成 NaN。
+ */
+function countEntries(value) {
+  if (Array.isArray(value)) return value.length
+  if (value !== null && typeof value === 'object') return Object.keys(value).length
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+}
+
+/**
+ * /upload 的失败文案：服务端只回错误码（bad-type / empty-file / too-large / no-launch-dir），
+ * 先按 ref.err.<code> 查本地字典翻成中文；查不到就退回服务端 message，再退回原码 ——
+ * 绝不把真实错误吞成一句笼统的「上传失败」。
+ */
+function uploadErrorText(res, t) {
+  const payload = res !== null && res !== undefined && res.payload !== null && typeof res.payload === 'object' ? res.payload : {}
+  const code = typeof payload.error === 'string' ? payload.error : ''
+  if (code !== '') {
+    const key = 'ref.err.' + code
+    const mapped = t(key)
+    if (typeof mapped === 'string' && mapped !== '' && mapped !== key) return mapped
+  }
+  if (typeof payload.message === 'string' && payload.message !== '') return payload.message
+  if (typeof res?.message === 'string' && res.message !== '') return res.message
+  if (code !== '') return code
+  return t('ref.failed')
+}
+
 // 面板组件：只放状态、钩子与动作；渲染全在 client/view-*.js 里，靠一个 bag 传进去。
 export function createPanel({ React }) {
   const h = React.createElement
@@ -57,20 +87,10 @@ function Panel(props) {
   React.useEffect(() => {
     let alive = true
     const boot = async () => {
-      const wf = await requestJson(api + '/workflows')
-      if (!alive) return
-      if (wf.ok && Array.isArray(wf.payload?.workflows)) {
-        setWorkflows(wf.payload.workflows)
-        setWorkflowState('ready')
-        setWorkflowError('')
-      } else {
-        setWorkflowState('error')
-        setWorkflowError(wf.message || t('workflow.error'))
-      }
-      const cfg = await requestJson(api + '/config')
-      if (!alive) return
-      if (cfg.ok && cfg.payload?.config) {
-        const c = cfg.payload.config
+      /* /state 是唯一入口：config / purge / comfy / workflows 都在里面，
+         冷启动只打一次 HTTP（/state 内部才会去 ping ComfyUI）。
+         老服务端缺段、或 /state 整个挂掉时，才回退 /config、/workflows、/comfy 三条老路由。 */
+      const applyConfigPayload = c => {
         setSettings({
           provider: String(c.llm?.provider ?? ''),
           model: String(c.llm?.model ?? ''),
@@ -92,14 +112,73 @@ function Panel(props) {
         if (typeof c.comfy?.defaultWorkflowId === 'string' && c.comfy.defaultWorkflowId !== '') {
           setWorkflowId(c.comfy.defaultWorkflowId)
         }
-      } else if (!cfg.ok) {
-        setSettingsError(cfg.message || t('error.config'))
       }
-      // 破甲灯要有服务端状态：/state 里的 purge 才是「当前生效」的那一份。
+      // /state 的 workflows 是数组、失败原因单列在 workflowsError 里（列表可以是空数组）。
+      const applyWorkflowsPayload = (list, error) => {
+        setWorkflows(Array.isArray(list) ? list : [])
+        if (typeof error === 'string' && error !== '') {
+          setWorkflowState('error')
+          setWorkflowError(error)
+          return
+        }
+        setWorkflowState('ready')
+        setWorkflowError('')
+      }
+      const loadConfig = async () => {
+        const cfg = await requestJson(api + '/config')
+        if (!alive) return null
+        if (cfg.ok && cfg.payload?.config !== null && typeof cfg.payload?.config === 'object') {
+          applyConfigPayload(cfg.payload.config)
+          return cfg.payload.config
+        }
+        if (!cfg.ok) setSettingsError(cfg.message || t('error.config'))
+        return null
+      }
+      const loadWorkflows = async () => {
+        const wf = await requestJson(api + '/workflows')
+        if (!alive) return
+        if (wf.ok && Array.isArray(wf.payload?.workflows)) {
+          applyWorkflowsPayload(wf.payload.workflows, '')
+          return
+        }
+        setWorkflowState('error')
+        setWorkflowError(wf.message || t('workflow.error'))
+      }
+
       const st = await requestJson(api + '/state')
       if (!alive) return
-      const purge = st.ok ? st.payload?.purge : null
+      const state = st.ok && st.payload !== null && typeof st.payload === 'object' ? st.payload : null
+
+      let config = state !== null && state.config !== null && typeof state.config === 'object' ? state.config : null
+      if (config !== null) applyConfigPayload(config)
+      else config = await loadConfig()
+      if (!alive) return
+
+      // 破甲灯要有服务端状态：/state 里的 purge 才是「当前生效」的那一份。
+      const purge = state === null ? null : state.purge
       if (purge !== null && purge !== undefined && typeof purge === 'object') setPurgeInfo(normalizePurge(purge))
+
+      // 工作流：/state 已经带了就说清了；连 workflows 段都没有才去问 /workflows。
+      if (state !== null && Array.isArray(state.workflows)) {
+        applyWorkflowsPayload(state.workflows, typeof state.workflowsError === 'string' ? state.workflowsError : '')
+      } else {
+        await loadWorkflows()
+        if (!alive) return
+      }
+
+      // ComfyUI 连不上是常态（没开、在换模型），所以状态要能自证：/state 的 comfy 就是 ping 结果，
+      // 启动目录跟 /comfy 的 launch.dir 同义，从刚回填的 config 补齐。
+      if (state !== null && state.comfy !== null && typeof state.comfy === 'object') {
+        applyComfy({
+          ok: true,
+          payload: { status: state.comfy, launch: { dir: String(config?.comfy?.launchDir ?? '') } },
+          message: '',
+        })
+      } else {
+        applyComfy(await requestJson(api + '/comfy'))
+        if (!alive) return
+      }
+
       // /spi 是自述接口：老版本没有这个路由，失败就当没有，不报错。
       const sp = await requestJson(api + '/spi')
       if (!alive) return
@@ -108,12 +187,10 @@ function Panel(props) {
         setSpi({
           ok: true,
           version: Number(spiInfo.version) || 0,
-          slots: Array.isArray(spiInfo.slots) ? spiInfo.slots.length : Number(spiInfo.slots) || 0,
-          hooks: Array.isArray(spiInfo.hooks) ? spiInfo.hooks.length : Number(spiInfo.hooks) || 0,
+          slots: countEntries(spiInfo.slots),
+          hooks: countEntries(spiInfo.hooks),
         })
       }
-      // ComfyUI 连不上是常态（没开、在换模型），所以状态要能自证：/comfy 同时回 ping 与启动计划。
-      applyComfy(await requestJson(api + '/comfy'))
     }
     boot()
     return () => {
@@ -249,7 +326,7 @@ function Panel(props) {
       })
       if (!res.ok || res.payload?.ok === false) {
         setRefName('')
-        setRefError(res.payload?.message ?? res.message ?? t('ref.failed'))
+        setRefError(uploadErrorText(res, t))
       } else {
         setRefName(String(res.payload?.name ?? ''))
       }

@@ -12,17 +12,59 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import tagsEntry, * as tagsNs from '../lib/tags.js'
 import { createTagIndex, escapeParens, parseTerm, resetTagIndexCache, unescapeTag } from '../lib/tags.js'
 import { runNormalize, summaryToJson, summaryToText } from '../scripts/build-tags.mjs'
 
 const silent = { info() {}, warn() {}, error() {} }
-const scratch = path.join(os.tmpdir(), 'dsh-prompt-forge-tags-test-' + process.pid)
+const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+// 每个进程一份独立目录，且结束就删：不能用 '前缀 + process.pid' —— pid 会被系统复用，
+// 上一次运行残留的 hot.jsonl / my-words.jsonl / build-out 会让这一轮的断言凭空失败
+// （hot-reload 用例里 canonicalize('zz_hot_word').matched 就该是 false）。
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-prompt-forge-tags-test-'))
+after(() => {
+  fs.rmSync(scratch, { recursive: true, force: true })
+})
+
+// DSH_TAGGER_DATA 被显式指定（CI、公开版、指到空目录做验收）时视作「隔离跑」：
+// 这种环境下不该再去探测本机那套 Danbooru 全量库，否则同一份测试在两台机器上行为不同。
+const isolated = String(process.env.DSH_TAGGER_DATA ?? '').trim() !== ''
+
+/** 包内的 data/tags/*.jsonl（overlay 补词表）在本仓里实际有哪几个。 */
+function packageOverlayFiles() {
+  const dir = path.join(repoRoot, 'data', 'tags')
+  if (!fs.existsSync(dir)) return []
+  return fs.readdirSync(dir).filter(name => name.endsWith('.jsonl')).map(name => path.join(dir, name))
+}
 
 // 真实数据索引：默认探测（本机 D:/QUARK/dsh-comfyui-workbench/data/danbooru）。
-const live = createTagIndex({ dir: scratch, logger: silent })
+const live = createTagIndex({ dir: scratch, logger: silent, probeDefaults: !isolated })
+
+/**
+ * 真实词库用例的守卫：拿不到 Danbooru 全量库（公开版 / CI / 隔离跑）就主动 skip，
+ * 返回 false 让调用方直接 return —— 缺库不是失败，是这台机器没有那份数据。
+ */
+async function needRealLib(t) {
+  await live.ready()
+  const stats = live.stats()
+  if (isolated || stats.seedOnly === true || stats.general === 0) {
+    t.skip('本机没有 Danbooru 词库')
+    return false
+  }
+  return true
+}
+
+/** overlay 用例的守卫：公开版不带那份补词表就 skip。 */
+async function needOverlay(t, fileName) {
+  await live.ready()
+  if (!live.stats().overlayFiles.some(file => file.endsWith(fileName))) {
+    t.skip('本机没有包内词表 ' + fileName)
+    return false
+  }
+  return true
+}
 
 test('构造是同步且便宜的：立刻有 seed 可用', () => {
   const stats = live.stats()
@@ -139,8 +181,8 @@ test('search：空查询按热度降序', () => {
   assert.ok(rows[0].standards.includes('wd'))
 })
 
-test('真实数据：ready() 之后 general/character/copyright/artist 都有量', async () => {
-  await live.ready()
+test('真实数据：ready() 之后 general/character/copyright/artist 都有量', async t => {
+  if (!(await needRealLib(t))) return
   const stats = live.stats()
   assert.equal(stats.ready, true)
   assert.ok(stats.general > 1000, 'general ' + stats.general)
@@ -169,7 +211,8 @@ test('无数据时用内置 seed 兜底（不探测默认路径）', async () =>
   assert.equal(stats.seedOnly, true)
   assert.equal(stats.primaryFiles.length, 0)
   // 包内 overlay（data/tags/*.jsonl）永远叠加，所以 sourceFiles 非空但不算「有真实数据」
-  assert.ok(stats.overlayFiles.length >= 1, JSON.stringify(stats.overlayFiles))
+  // 包内 overlay 的数量应严格等于仓里 data/tags 实际有几个 jsonl（公开版可能一个都不带）
+  assert.equal(stats.overlayFiles.length, packageOverlayFiles().length, JSON.stringify(stats.overlayFiles))
   assert.ok(stats.general > 100, 'seed general ' + stats.general)
   assert.ok(stats.character >= 20, 'seed character ' + stats.character)
   assert.equal(seedOnly.search('初音未来', { limit: 1 }).length, 1)
@@ -236,13 +279,8 @@ test('search：多词查询按命中词数优先，不被单个词的热度带�
   assert.ok(byChinese.includes('smile'), 'smile in ' + byChinese.join(','))
 })
 
-test('overlay：包内 data/tags/*.jsonl 补的 NSFW 词条命中且带中文', async () => {
-  await live.ready()
-  const stats = live.stats()
-  assert.ok(
-    stats.overlayFiles.some(file => file.endsWith('general-nsfw.jsonl')),
-    JSON.stringify(stats.overlayFiles),
-  )
+test('overlay：包内 data/tags/*.jsonl 补的 NSFW 词条命中且带中文', async t => {
+  if (!(await needOverlay(t, 'general-nsfw.jsonl'))) return
 
   const row = live.canonicalize('hand_on_own_breast')
   assert.equal(row.matched, true)
@@ -260,7 +298,7 @@ test('overlay：包内 data/tags/*.jsonl 补的 NSFW 词条命中且带中文', 
   assert.ok(existing.cn.length > 0, 'spread_pussy 中文被清空了')
 })
 
-test('overlay：<dataDir>/tags 的用户词表叠加进主流数据，不替换主流', async () => {
+test('overlay：<dataDir>/tags 的用户词表能被查到（不依赖真实库）', async () => {
   const dir = path.join(scratch, 'overlay-user')
   const fs = await import('node:fs/promises')
   await fs.mkdir(path.join(dir, 'tags'), { recursive: true })
@@ -269,12 +307,10 @@ test('overlay：<dataDir>/tags 的用户词表叠加进主流数据，不替换�
     JSON.stringify({ tag: 'zz_custom_probe_tag', cn: 'zz自造词', kind: 'general', postCount: 12 }) + '\n',
     'utf8',
   )
-  const index = createTagIndex({ dir, logger: silent })
+  // probeDefaults:false：公开版没有 workbench 全量库，这条只验「用户词表会不会被读进来」
+  const index = createTagIndex({ dir, probeDefaults: false, logger: silent })
   await index.ready()
   const stats = index.stats()
-  assert.equal(stats.seedOnly, false, '主流 workbench 数据还在')
-  assert.ok(stats.primaryFiles.length >= 3, JSON.stringify(stats.primaryFiles))
-  assert.ok(stats.general > 1000, 'general ' + stats.general)
   assert.ok(
     stats.overlayFiles.some(file => file.endsWith('my-words.jsonl')),
     JSON.stringify(stats.overlayFiles),
@@ -285,8 +321,30 @@ test('overlay：<dataDir>/tags 的用户词表叠加进主流数据，不替换�
   assert.equal(hit.cn, 'zz自造词')
 })
 
-test('NSFW 词表回归：常见露骨 tag 全部命中且都有中文（overlay 生效的证据）', async () => {
-  await live.ready()
+test('overlay：用户词表叠加进主流数据，不替换主流', async t => {
+  const dir = path.join(scratch, 'overlay-user-main')
+  const fs = await import('node:fs/promises')
+  await fs.mkdir(path.join(dir, 'tags'), { recursive: true })
+  await fs.writeFile(
+    path.join(dir, 'tags', 'my-words.jsonl'),
+    JSON.stringify({ tag: 'zz_custom_probe_tag', cn: 'zz自造词', kind: 'general', postCount: 12 }) + '\n',
+    'utf8',
+  )
+  const index = createTagIndex({ dir, probeDefaults: !isolated, logger: silent })
+  await index.ready()
+  const stats = index.stats()
+  if (isolated || stats.seedOnly === true || stats.general === 0) {
+    t.skip('本机没有 Danbooru 词库')
+    return
+  }
+  assert.equal(stats.seedOnly, false, '主流 workbench 数据还在')
+  assert.ok(stats.primaryFiles.length >= 3, JSON.stringify(stats.primaryFiles))
+  assert.ok(stats.general > 1000, 'general ' + stats.general)
+  assert.equal(index.canonicalize('zz自造词').tag, 'zz_custom_probe_tag')
+})
+
+test('NSFW 词表回归：常见露骨 tag 全部命中且都有中文（overlay 生效的证据）', async t => {
+  if (!(await needOverlay(t, 'general-nsfw.jsonl'))) return
   const want = ["labia","butt_grab","squatting_sex","penis_in_pussy","penis_in_ass","after_orgasm","hand_on_own_breast","hand_on_own_pussy","hand_on_breast","hand_on_butt","cupping_breasts","squeezing_own_breasts","partially_covered","exposed_breasts","exposed_pussy","transparent_clothes","oiled_skin","sweaty","nude_pose","bath_towel","shower","night_lighting","warm_lighting","close-up_on_crotch","close-up_on_breasts","shaved_pussy","squirting","nakadashi","creampie","grinding","face_sitting","sex_under_blanket","biting_lip","lust","toes_curled","gripping_sheets","clothed_masturbation","sweat_on_skin","white_liquid","pussy_eating","rimming","lewd_clothing","see_through_skirt","wet_panty","desk_lamp"]
   const missing = []
   const noChinese = []
@@ -299,8 +357,10 @@ test('NSFW 词表回归：常见露骨 tag 全部命中且都有中文（overlay
   assert.deepEqual(noChinese, [], '这些词没有中文名：' + noChinese.join(','))
 })
 
-test('构图/光线词 overlay：半身、全景、特写、逆光都命中且带中文', async () => {
-  await live.ready()
+test('构图/光线词 overlay：半身、全景、特写、逆光都命中且带中文', async t => {
+  if (!(await needOverlay(t, 'scene-common.jsonl'))) return
+  // light_rays / depth_of_field 这类是主流库里的词，没有全量库时这条也跳过
+  if (!(await needRealLib(t))) return
   const want = ['medium_shot', 'full_shot', 'close-up', 'light_beam', 'backlighting', 'light_rays', 'depth_of_field']
   const missing = want.filter(tag => !live.canonicalize(tag).matched)
   assert.deepEqual(missing, [], '索引里没有这些构图词：' + missing.join(','))
@@ -338,8 +398,6 @@ test('ensureFresh：词表文件一改，下一次查就热重载，不用重启
 // ─────────────────────────────────────────────────────────────────────────────
 // 拆分后的结构：lib/tags.js 只做转发，实现分在 lib/tags/ 四个文件里。
 // 这几条是「拆分没走样」的护栏：体积、单例、导出面、build-tags 统计。
-
-const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
 test('拆分体积：lib/tags.js 是薄入口（< 8KB），子模块各自 < 30KB', () => {
   const entryFile = path.join(repoRoot, 'lib', 'tags.js')
@@ -417,9 +475,11 @@ test('build-tags：runNormalize 报告总条目 / 分类计数 / 重复 tag / �
   assert.equal(summary.bad, 0)
   assert.equal(summary.sourceFiles.length, 2)
 
-  // overlay 统计：至少能数出包内词表，且我们自己造的 zz_ 词不在里面
-  assert.ok(summary.overlay.files >= 1, JSON.stringify(summary.overlay))
-  assert.ok(summary.overlay.tags > 0)
+  // overlay 统计：数出来的文件数应等于仓里 data/tags 实际有几个 jsonl（公开版可能 0 个），
+  // 「有词汇表」与「有文件」必须同时成立，不能靠单边断言糊过去
+  const pkgOverlay = packageOverlayFiles()
+  assert.equal(summary.overlay.files, pkgOverlay.length, JSON.stringify(summary.overlay))
+  assert.equal(summary.overlay.tags > 0, pkgOverlay.length > 0, JSON.stringify(summary.overlay))
   assert.equal(summary.overlay.covered, 0, 'zz_ 开头的自造词不该被 overlay 认领')
   assert.equal(summary.overlay.missing, summary.overlay.tags)
 

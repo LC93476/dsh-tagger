@@ -87,10 +87,11 @@ docs/PERF.md            实测性能数字与健壮性清单（scripts/bench.mjs
 ```bash
 cd "/d/DSh tagger"
 ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe" \
-  --test tests/*.test.mjs
+  --test --test-concurrency=1 tests/*.test.mjs
 ```
 
-（`--test` 必须逐文件列；给目录会 MODULE_NOT_FOUND。）
+（`--test` 必须逐文件列；给目录会 MODULE_NOT_FOUND。`--test-concurrency=1` 不能省：几个套件会读同一份
+默认词表目录，进程并行时可能撞上另一个进程正在重写 overlay，表现为偶发 1 条失败，单跑必绿。）
 
 16 个套件：`comfy` `forge` `http` `mcp` `poses` `postprocess` `refine` `render` `repair` `shim`
 `standalone` `tags` `tags-pose` `ui2api` `upload` `zh-intent`。
@@ -108,7 +109,7 @@ npm i --no-save typescript @types/node   # 只在本地查，不写进依赖
 npx tsc --noEmit -p tsconfig.json
 ```
 
-CI 跑同样的两件事，见 `.github/workflows/ci.yml`。
+CI 跑同样的三道门禁（词表自检 → 类型检查 → 全量测试），见 `.github/workflows/ci.yml`；本地等价命令就是上面这三条。
 
 ## 装了哪两个 profile
 

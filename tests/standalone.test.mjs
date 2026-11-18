@@ -180,6 +180,19 @@ test('standalone：health / spi / spi.version / 根路径 HTML 都能对外提�
     const appJs = await appRes.text()
     assert.ok(appJs.includes('doRefine'), '精修逻辑要在 app.js 里')
     assert.ok(appJs.includes('renderResult'), '渲染逻辑要在 app.js 里')
+    // 服务端错误码要折成人话，别把 bad-type / no-launch-dir 这种码直接甩给用户
+    assert.ok(appJs.includes('ERR_TEXT'), 'app.js 要有错误码中文表')
+    assert.ok(appJs.includes('只收 png / jpg / webp 图片'), 'bad-type 要有中文说明')
+    assert.ok(appJs.includes('先在设置里填 ComfyUI 的安装目录'), 'no-launch-dir 要有中文说明')
+    // boot 只该打 /state 一个状态接口，不再分别打 /workflows、/config、/comfy
+    assert.ok(appJs.includes('api("/state")'), 'boot 要打 /state')
+    // 桌面版的参数记忆：关掉浏览器再回来，宽高/种子/工作流还在
+    assert.ok(appJs.includes('localStorage.setItem(LS_KEY'), '要记住出图参数')
+    assert.ok(appJs.includes('function loadUi'), '启动时要把上次的参数读回来')
+    // boot 里必须真的调一次，否则刷新后参数又回默认值（曾经就是漏了这一行）
+    assert.ok(appJs.split('loadUi()').length - 1 >= 2, 'boot 要调用 loadUi()')
+    // /comfy 只有用户点「探活」时才打，可以留；/workflows 完全该由 /state 提供，不许再有
+    assert.ok(appJs.includes('api("/workflows")') === false, '/workflows 该由 /state 一起给，不许再单独打')
 
     const apiJs = await (await fetch(url + '/public/api.js')).text()
     assert.ok(apiJs.includes('"/tagger/api"'), '面板要打到自己这个前缀上')

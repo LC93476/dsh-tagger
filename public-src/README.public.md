@@ -63,6 +63,18 @@
 公开发布版只带了 `pose-view.jsonl`（姿势与视角）、`scene-common.jsonl`、`quality-common.jsonl` 与一份格式示例；
 其余按需自己补。词表里有的词，模型输出前会被校验命中。
 
+## 与完整版的差别
+
+| 项 | 完整版 | 公开发布版 |
+| --- | --- | --- |
+| 露骨词表 | 内置 `data/tags/general-nsfw.jsonl` 等 | 不内置，只留格式示例 |
+| 露骨词示例 | 提示词与测试里直接列举 | 一律不列举，改成「按你本机词表直写」 |
+| 后处理规则表 | 含成人向细节词的精确分桶 | 只保留姿势 / 服饰 / 镜头等常规分桶 |
+| 代码结构 / 功能 | 同左 | **完全一致**，只是少了那份词表 |
+
+删掉的是**词表与示例**，不是能力：`lib/purge.js` 的破甲层、`lib/postprocess/` 的合并/排序/裁剪、
+MCP 工具与面板全部保留。把自备词表丢进 `data/tags/` 就补齐。
+
 ## 安装（三种方式）
 
 ### 1. DSH 插件（桌面端侧边栏）
@@ -106,23 +118,34 @@ DSH 插件模式下，`POST /tagger/api/mcp` 就是 MCP 端点；独立服务下
 ## 目录结构
 
 ```
-index.js            宿主入口（HTTP 路由 + 工具注册）
-client.js           DSH 侧边栏面板（ModuleLoader 工厂）
-lib/forge.js        锻造主流程（LLM 调用 + 校验 + 三道后处理）
-lib/purge.js        破甲层与标签写法规范（系统提示词全在这里）
-lib/tags.js         Danbooru 索引、词形归一、权重语法
-lib/repair.js       词形修复器
-lib/postprocess.js  去重 / 合序 / 裁剪 / 补人数
-lib/zh-intent.js    中文姿势意图 → tag
-lib/refine.js       二次精修（四模式，只回差分）
-lib/comfy.js        ComfyUI 客户端（模板变量注入 + 轮询 + 上传）
-lib/mcp.js          MCP 协议实现
-lib/spi.js          扩展接口注册表
+index.js               宿主入口（HTTP 路由 + 工具注册）
+client.js              面板入口（薄壳，转调 client/）
+client/                面板实现（state / api / panel / view-* / css / locale）
+lib/forge.js           锻造门面
+lib/forge/             锻造主流程（options → prompt → stream → parse → pipeline → history）
+lib/purge.js           破甲层与标签写法规范（系统提示词全在这里）
+lib/tags.js            Danbooru 索引门面
+lib/tags/              索引实现（loader 读库 / matcher 匹配 / text 词形归一）
+lib/repair.js          词形修复器
+lib/postprocess.js     后处理门面
+lib/postprocess/       rules.js（13 段桶表、上下位对、同义组）+ index.js（去重/降权/排序/补人数/裁剪）
+lib/zh-intent.js       中文姿势意图 → tag
+lib/refine.js          二次精修门面
+lib/refine/            四模式差分（prompt / diff / apply / consts）
+lib/comfy.js           ComfyUI 客户端（模板变量注入 + 轮询 + 上传）
+lib/comfy-workflow.js  ComfyUI 工作流 schema 注入
+lib/mcp.js             MCP 协议实现
+lib/spi.js             扩展接口注册表
+lib/routes.js          HTTP 路由表
+lib/config.js          配置默认值与落盘
 server/standalone.mjs  独立 HTTP 服务
-server/panel.html      独立 Web 面板
-data/tags/          附加值词表（overlay，热重载）
-tools/              ui2api 转换器、缩略图生成器、公开发布打包器
-tests/              node:test 用例
+server/panel.html      独立 Web 面板外壳
+server/public/         独立面板前端（app / api / state / panel.css）
+data/tags/             附加值词表（overlay，热重载）
+scripts/               词表构建 / 一致性检查 / 基准 / 发布脚本
+tools/                 ui2api 转换器、缩略图生成器
+types/host.d.ts        宿主 API 的最小类型声明
+tests/                 node:test 用例
 ```
 
 ## 跑测试

@@ -8,12 +8,12 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/health` | `{ plugin: 'dsh-tagger', version, dataDir }` |
-| GET | `/state` | 面板启动一次性要的全部状态：`{ config, purge, comfy, workflows, workflowsError?, history }` |
-| GET/POST | `/config` | GET 读配置视图；POST `{ patch }` 写持久化覆盖并热应用 |
+| GET | `/state` | 面板启动一次性要的全部状态：`{ config, purge, comfy, workflows, workflowsError?, history }`（**没有 `ok` 字段**，出错看 `workflowsError` 与 `comfy.ok`） |
+| GET/POST | `/config` | GET 读配置视图（同样是裸对象，不含 `ok`）；POST `{ patch }` 写持久化覆盖并热应用 → `{ ok: true, config }` |
 | GET/POST | `/purge` | GET 读破甲档位与系统提示词预览；POST `{ purge: { enabled, level, extraDirectives } }` |
 | GET | `/models?provider=` | 该 provider 可用模型列表 |
 | POST | `/probe` | LLM 连通性探针，返回逐 chunk 摘要（`{ ok, args, chunks }`） |
-| GET | `/spi` | SPI 注册表快照 `{ ok, spi: { version, slots, hooks, backends } }` |
+| GET | `/spi` | SPI 注册表快照 `{ ok, spi: { version, slots: { 槽位: [{ id, label }] }, hooks: { 钩子: [id] }, backends } }` —— `slots` / `hooks` 是**对象**（按槽位名分组），不是数组 |
 | POST | `/forge` | 白话 → 标签：body `{ text, options }` |
 | POST | `/refine` | 二次精修：body `{ positive, negative, instruction, mode, options }` |
 | GET | `/workflows` | 模板列表 `{ workflows, dir }` |
@@ -39,6 +39,19 @@
 
 `/public` 只收白名单扩展名（`.css .js .json .svg .png .jpg .jpeg .webp`），带 `..` 或解析后跑到
 `server/public/` 之外的路径一律 `400 {"ok":false,"error":"bad-path"}`（挡路径穿越）。
+
+## `/state` 里 `purge` 的子形状
+
+`purgeState()` 的返回被面板用来画破甲灯，四个字段都保证存在：
+
+```js
+{ enabled: true,        // level 为 off，或 config.purge.enabled 显式为 false 时是 false
+  level: "max",         // off | light | standard | full | max
+  modules: ["direct-output", "adult-allowed", "no-refusal"],  // 当前档位生效的模块名
+  chars: 6400 }         // 拼进系统提示词的破甲层总字数
+```
+
+面板拿到不认识的 `level` 一律退回 `full`（`client/state.js` 的 `normalizePurge`）。
 
 ## `POST /forge`
 

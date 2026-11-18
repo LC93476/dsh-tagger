@@ -21,7 +21,7 @@ const clientDir = path.join(root, 'client')
 
 /* ── 子模块预载 ─────────────────────────────────────────────────────────────
  * client.js 只是门面：面板实现拆成 client/ 下的 ESM 子模块，由宿主按
- * {PREFIX}/_mod/<name>.js 提供。测试里用 file:// 基址喂 __DSH_TAGGER_MODBASE__，
+ * {PREFIX}/_mod/client/<name>.js 提供。测试里用 file:// 基址喂 __DSH_TAGGER_MODBASE__，
  * 再把 panel.js 提前 import 好塞进 __DSH_TAGGER_MODS__ —— 于是 loadClient() 仍
  * 保持同步、__internals 立即可用、apply 走「模块已缓存」的同步注册分支，
  * 与宿主二次挂载时的路径完全一致。
@@ -336,16 +336,22 @@ const workflowsPayload = {
   workflows: [{ id: 'wf-a', title: 'A workflow' }, { id: 'wf-b', title: 'B workflow' }],
 }
 
+// /state 是面板冷启动的唯一入口：config / purge / comfy / workflows / history 一次拿全。
+const statePayload = {
+  ok: true,
+  config: configPayload.config,
+  purge: { enabled: true, level: 'full', chars: 640, modules: ['direct-output', 'adult-allowed', 'no-refusal'] },
+  comfy: { ok: true, reachable: true, version: '0.45.0', baseUrl: 'http://127.0.0.1:8188' },
+  workflows: workflowsPayload.workflows,
+  history: [],
+}
+
 function defaultRoutes(overrides = {}) {
   return {
+    'GET /state': { body: statePayload },
+    // /state 挂掉时的回退路由：正常路径不该被请求（有回归守着）。
     'GET /workflows': { body: workflowsPayload },
     'GET /config': { body: configPayload },
-    'GET /state': {
-      body: {
-        ok: true,
-        purge: { enabled: true, level: 'full', chars: 640, modules: ['direct-output', 'adult-allowed', 'no-refusal'] },
-      },
-    },
     'GET /comfy': {
       body: {
         ok: true,
@@ -659,7 +665,8 @@ test('面板：工作流读不到时显示错误但面板仍可用', async () =>
   const t = internals.createT('zh')
 
   await withFetch(defaultRoutes({
-    'GET /workflows': { status: 502, body: { ok: false, error: 'workflows', message: 'ComfyUI 连不上' } },
+    // 冷启动只打 /state：工作流列表空、失败原因单列在 workflowsError 里。
+    'GET /state': { body: { ...statePayload, workflows: [], workflowsError: 'ComfyUI 连不上' } },
   }), async () => {
     const view = createView(React, internals.Panel, { t, api: '/prompt-forge/api' })
     await view.mount()
@@ -819,9 +826,18 @@ test('面板：ComfyUI 灯显示连接状态，点一下重新探活，启动按
   const t = internals.createT('zh')
   let status = { ok: true, reachable: true, version: '0.45.0', baseUrl: 'http://127.0.0.1:8188' }
 
+  // 冷启动只打 /state：comfy 段是 ping 结果，启动目录取 config.comfy.launchDir（面板按 launch.dir 用）。
+  const launchDir = 'D:/QUARK/ComfyUI-aki-v3.2/ComfyUI'
   await withFetch(defaultRoutes({
+    'GET /state': () => ({
+      body: {
+        ...statePayload,
+        comfy: status,
+        config: { ...configPayload.config, comfy: { ...configPayload.config.comfy, launchDir } },
+      },
+    }),
     'GET /comfy': () => ({
-      body: { ok: true, status, launch: { ok: true, dir: 'D:/QUARK/ComfyUI-aki-v3.2/ComfyUI', command: 'python -s main.py' }, workflows: [] },
+      body: { ok: true, status, launch: { ok: true, dir: launchDir, command: 'python -s main.py' }, workflows: [] },
     }),
   }), async calls => {
     const view = createView(React, internals.Panel, { t, api: '/prompt-forge/api' })
@@ -1186,5 +1202,192 @@ test('体积护栏：门面 < 12KB、client/ 每个子模块 < 30KB、文件名�
     assert.match(name, /^[a-z0-9][a-z0-9-]*\.js$/, name + ' 不符合 _mod 路由白名单')
     const size = readFileSync(path.join(clientDir, name)).length
     assert.ok(size < 30 * 1024, name + ' 超 30KB：' + size + ' 字节')
+  }
+})
+
+test('门面基址带 client/ 段：宿主的 _mod 白名单是 client/<name>.js，漏了就是 400 bad-module', async () => {
+  const React = createFakeReact()
+  const source = readFileSync(clientPath, 'utf8')
+  // 静态护栏：两个前缀都必须拼成 {PREFIX}/_mod/client/，不能被改回裸 /_mod/。
+  assert.ok(source.includes("API + '/_mod/client/'"), '主前缀基址要带 client/ 段')
+  assert.ok(source.includes("LEGACY_API + '/_mod/client/'"), '旧前缀基址也要带 client/ 段')
+  assert.equal(source.includes("+ '/_mod/'"), false, '不能再出现裸的 /_mod/ 基址')
+
+  // 行为验证：没有注入基址时，加载失败的错误里要看得见真去请求的 client/ 路径。
+  const previousBase = globalThis.__DSH_TAGGER_MODBASE__
+  const previousMods = globalThis.__DSH_TAGGER_MODS__
+  delete globalThis.__DSH_TAGGER_MODBASE__
+  delete globalThis.__DSH_TAGGER_MODS__
+  try {
+    const { module } = loadClient(React)
+    const registered = []
+    const ctx = {
+      slots: {
+        inject(name, factory) { factory() },
+        register(options, component) { registered.push({ options, component }); return () => {} },
+      },
+    }
+    await module.apply(ctx)
+    const main = registered.find(item => item.options.name === 'main')
+    const view = createView(React, main.component, {})
+    view.render()
+    const detail = byTestId(view.tree, 'ptf-load-error-message')
+    assert.ok(detail, '取不到子模块要有错误卡')
+    assert.match(textOf(detail), /_mod[\\/]client[\\/]panel\.js/, '请求路径要带 client/ 段，实际=' + textOf(detail))
+    assert.deepEqual(rawKeys(view.tree), [])
+  } finally {
+    globalThis.__DSH_TAGGER_MODBASE__ = previousBase
+    globalThis.__DSH_TAGGER_MODS__ = previousMods
+  }
+})
+
+test('面板：/spi 的 slots / hooks 是对象形状时按条数计数（不是 Number(obj)=NaN）', async () => {
+  const React = createFakeReact()
+  const { internals } = loadClient(React)
+  const t = internals.createT('zh')
+
+  await withFetch(defaultRoutes({
+    'GET /spi': {
+      body: {
+        ok: true,
+        spi: {
+          version: 2,
+          // describe() 的真实形状：槽位 → 该槽可注册的若干项；钩子 → 钩子 id 数组。
+          slots: { 'sidebar.panellist': [{ id: 'prompt-forge', label: '提示词' }], main: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] },
+          hooks: { 'panel:after': ['h1', 'h2', 'h3'] },
+        },
+      },
+    },
+  }), async () => {
+    const view = createView(React, internals.Panel, { t, api: internals.API })
+    await view.mount()
+    const badge = byTestId(view.tree, 'ptf-spi-badge')
+    assert.ok(badge, '有 /spi 就要有徽标')
+    assert.equal(badge.props['data-slots'], 2, '两个槽位，不是 0')
+    const text = textOf(badge)
+    assert.ok(text.includes('SPI v2'), '显示 SPI v2，实际=' + text)
+    assert.ok(text.includes('2'), '显示槽位数 2，实际=' + text)
+    assert.deepEqual(rawKeys(view.tree), [])
+    view.unmount()
+  })
+})
+
+test('冷启动只打 /state：不再单独请求 /workflows、/config、/comfy', async () => {
+  const React = createFakeReact()
+  const { internals } = loadClient(React)
+  const t = internals.createT('zh')
+
+  await withFetch(defaultRoutes(), async calls => {
+    const view = createView(React, internals.Panel, { t, api: internals.API })
+    await view.mount()
+
+    const gets = calls.filter(call => call.method === 'GET').map(call => call.path)
+    assert.ok(gets.includes('/state'), '/state 是唯一入口，实际=' + gets.join(','))
+    for (const path of ['/workflows', '/config', '/comfy']) {
+      assert.equal(gets.includes(path), false, '冷启动不该再打 ' + path + '，实际=' + gets.join(','))
+    }
+
+    // 一次 /state 就把设置、工作流、ComfyUI 灯都点亮了。
+    assert.equal(byTestId(view.tree, 'ptf-set-model').props.value, 'deepseek-v4.1-flash', '设置从 /state 的 config 回填')
+    assert.equal(byTestId(view.tree, 'ptf-workflow-error'), null, '/state 说工作流正常就不该报错')
+    const lamp = byTestId(view.tree, 'ptf-comfy-lamp')
+    assert.equal(lamp.props['data-state'], 'online', '灯从 /state 的 comfy 段点亮')
+    assert.ok(String(lamp.props.title).includes('0.45.0'), '版本号要进来：' + lamp.props.title)
+    assert.deepEqual(rawKeys(view.tree), [])
+    view.unmount()
+  })
+})
+
+test('冷启动回退：/state 整个挂了才回退 /config、/workflows、/comfy', async () => {
+  const React = createFakeReact()
+  const { internals } = loadClient(React)
+  const t = internals.createT('zh')
+
+  await withFetch(defaultRoutes({
+    'GET /state': { status: 500, body: { ok: false, error: 'state', message: '状态读不出来' } },
+  }), async calls => {
+    const view = createView(React, internals.Panel, { t, api: internals.API })
+    await view.mount()
+
+    const gets = calls.filter(call => call.method === 'GET').map(call => call.path)
+    for (const path of ['/config', '/workflows', '/comfy']) {
+      assert.ok(gets.includes(path), '/state 挂了要回退 ' + path + '，实际=' + gets.join(','))
+    }
+    // 回退路径也把面板填满了：设置、工作流、灯都在。
+    assert.equal(byTestId(view.tree, 'ptf-set-model').props.value, 'deepseek-v4.1-flash')
+    assert.equal(byTestId(view.tree, 'ptf-workflow-error'), null)
+    assert.equal(byTestId(view.tree, 'ptf-comfy-lamp').props['data-state'], 'online')
+    assert.deepEqual(rawKeys(view.tree), [])
+    view.unmount()
+  })
+})
+
+test('参考图上传失败按 ref.err.<code> 翻成中文，认不出的码退回原码', async () => {
+  const React = createFakeReact()
+  const { internals } = loadClient(React)
+  const t = internals.createT('zh')
+
+  const hadReader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader')
+  Object.defineProperty(globalThis, 'FileReader', {
+    configurable: true,
+    writable: true,
+    value: class FakeReader {
+      constructor() {
+        this.result = ''
+        /** @type {null | (() => void)} */
+        this.onload = null
+        /** @type {null | (() => void)} */
+        this.onerror = null
+      }
+      /** @param {string} [_url] */
+      readAsDataURL(_url) {
+        this.result = 'data:image/png;base64,AA=='
+        Promise.resolve().then(() => { if (typeof this.onload === 'function') this.onload() })
+      }
+    },
+  })
+
+  try {
+    // 参考图只在「带参考图」的工作流下启用，所以把默认工作流设成 wf-ref。
+    const refConfig = {
+      ...configPayload.config,
+      comfy: { ...configPayload.config.comfy, defaultWorkflowId: 'wf-ref' },
+    }
+    const cases = [
+      { code: 'too-large', expected: t('ref.err.too-large'), showsCode: false },
+      { code: 'bad-type', expected: t('ref.err.bad-type'), showsCode: false },
+      { code: 'no-launch-dir', expected: t('ref.err.no-launch-dir'), showsCode: false },
+      { code: 'empty-file', expected: t('ref.err.empty-file'), showsCode: false },
+      { code: 'weird-code', expected: 'weird-code', showsCode: true },
+    ]
+
+    for (const item of cases) {
+      await withFetch(defaultRoutes({
+        'GET /state': { body: { ...statePayload, config: refConfig } },
+        'POST /upload': { status: 400, body: { ok: false, error: item.code } },
+      }), async () => {
+        const view = createView(React, internals.Panel, { t, api: internals.API })
+        await view.mount()
+        byTestId(view.tree, 'ptf-text').props.onChange({ target: { value: '银发少女在窗边回头' } })
+        await view.settle()
+        byTestId(view.tree, 'ptf-generate').props.onClick()
+        await view.settle()
+
+        const input = byTestId(view.tree, 'ptf-ref-file')
+        assert.ok(input, '有结果后才有参考图输入')
+        input.props.onChange({ target: { files: [{ name: 'a.png' }] } })
+        await view.settle()
+
+        const status = textOf(byTestId(view.tree, 'ptf-ref-status'))
+        assert.ok(status.includes(item.expected), item.code + ' 要显示「' + item.expected + '」，实际=' + status)
+        if (item.showsCode) assert.ok(status.includes(item.code), '认不出的码要原样露出来：' + status)
+        else assert.equal(status.includes(item.code), false, '认得的码不该再把英文码露给用户：' + status)
+        assert.deepEqual(rawKeys(view.tree), [])
+        view.unmount()
+      })
+    }
+  } finally {
+    if (hadReader === undefined) delete globalThis.FileReader
+    else Object.defineProperty(globalThis, 'FileReader', hadReader)
   }
 })

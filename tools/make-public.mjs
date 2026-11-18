@@ -26,6 +26,12 @@ const dstAt = argv.indexOf('--dst')
 const DST = path.resolve(dstAt >= 0 ? argv[dstAt + 1] : path.join(path.dirname(ROOT), 'DSh tagger-lite'))
 const DRY = argv.includes('--dry')
 
+/** 单文件行数上限：超过就整份不进公开版（公开仓库要能被一口气读完）。 */
+const MAX_LINES = 1500
+
+/** 公开版目录里一律不许出现的路径：构建产物 / 日志 / 缓存。 */
+const BANNED_PATH = /^(?:node_modules|dist|\.cache|tmp)\/|\.log$/i
+
 /** 露骨词红线：解剖 / 体液 / 性行为 / 中文对应词。命中即不许进公开版。 */
 const FORBIDDEN = new RegExp(
   [
@@ -39,15 +45,38 @@ const FORBIDDEN = new RegExp(
   'i'
 )
 
-const SKIP = new Set(['data/tags/general-nsfw.jsonl'])
+const SKIP = new Set([
+  'data/tags/general-nsfw.jsonl',
+  // public-src 是本脚本的素材（README 覆盖版放在这里），本身不进公开版。
+  'public-src/README.public.md',
+  // 仓库里遗留的一次性探针脚本，没有任何模块引用它。
+  'tests/_hint-probe.mjs',
+  // 生成脚本自己不进公开版：它的表里逐字写着红线词，整行丢掉后只剩一个残缺的分词器，
+  // 而公开仓库本来就不需要重新生成一次公开版。
+  'tools/make-public.mjs',
+])
 
 const OVERRIDE = new Map([['README.md', 'public-src/README.public.md']])
 
+const GLOBAL_RULES = [
+  ['C:/Users/34701', 'C:/Users/<你的用户名>'],
+  ['C:\\Users\\34701', 'C:\\Users\\<你的用户名>'],
+  ['/d/DSh tagger', '/d/DSh tagger-lite'],
+  ['D:/DSh tagger', 'D:/DSh tagger-lite'],
+  ['D:/QUARK/dsh-prompt-forge', 'D:/DSh tagger-lite'],
+]
+
 const LINE_RULES = new Map([
-  ['lib/postprocess.js', [
+  // 后处理规则表搬到 lib/postprocess/rules.js 之后，原来指向 lib/postprocess.js 的锚点跟着搬：
+  // 那条「词根 → sexual 段」的正则里逐字写着红线词，公开版换成同义但不含露骨词的词根集合。
+  ['lib/postprocess/rules.js', [
     [
-      '[/sex|penis|pussy|vagina|anus|clitor|nipple|areola',
-      "  [/mature|adult|suggestive|nsfw/i, 'sexual'],"
+      "  [/sex|penis|pussy|vagina|anus|clitor|nipple|areola|_cum|cum_|semen|orgasm|nude|naked|paizuri|handjob|footjob|fellatio|masturbat|fingering|cunnilingus|saliva|foreplay|aroused|lewd|suggestive|butt_grab|anatomically_correct/, 'sexual'],",
+      "  [/sex|nude|naked|saliva|foreplay|aroused|lewd|suggestive|butt_grab|sexually_suggestive/, 'sexual'],"
+    ],
+    [
+      "  hand_on_own_pussy: 'limbs', hand_up: 'limbs',",
+      "  hand_up: 'limbs',"
     ]
   ]],
   ['lib/purge.js', [
@@ -76,6 +105,18 @@ const LINE_RULES = new Map([
 
 /** 整段替换（多行块）：原文必须逐字命中，否则报错。 */
 const BLOCK_RULES = new Map([
+  // rules.js 的两段表（上下位对、精确桶的「性相关细节」整段）逐行写着露骨词，
+  // 整行删会把数组 / 对象结构改坏，所以整块精确替换成不含露骨词的等价结构。
+  ['lib/postprocess/rules.js', [
+    [
+      "  ['sex', 'vaginal'],\n  ['sex', 'anal'],\n  ['sex', 'oral'],\n  ['sex', 'paizuri'],\n  ['sex', 'handjob'],",
+      "  // 公开版不含成人向上下位对：完整版在「裸体」之后还有几条「上位词 + 具体行为」的降权关系，\n  // 公开版不内置这套词表，所以这一段只留姿势与裸体。"
+    ],
+    [
+      "  sex: 'sexual', vaginal: 'sexual', anal: 'sexual', oral: 'sexual', fellatio: 'sexual',\n  paizuri: 'sexual', handjob: 'sexual', footjob: 'sexual', masturbation: 'sexual',\n  fingering: 'sexual', cunnilingus: 'sexual', missionary: 'sexual',\n  doggystyle: 'sexual', cowgirl_position: 'sexual', reverse_cowgirl_position: 'sexual',\n  girl_on_top: 'sexual', standing_sex: 'sexual', squatting_sex: 'sexual',\n  sex_from_behind: 'sexual', against_wall: 'sexual', penis: 'sexual', pussy: 'sexual',\n  vagina: 'sexual', anus: 'sexual', clitoris: 'sexual', precum: 'sexual',\n  cum: 'sexual', cum_in_pussy: 'sexual', cum_in_mouth: 'sexual', cum_overflow: 'sexual',\n  cum_on_breasts: 'sexual', cum_on_body: 'sexual', cum_on_hair: 'sexual',\n  cum_on_tongue: 'sexual', cum_on_stomach: 'sexual', cum_on_chest: 'sexual',\n  cum_string: 'sexual', facial: 'sexual', orgasm: 'sexual', after_orgasm: 'sexual',\n  after_sex: 'sexual', nipples: 'sexual', areolae: 'sexual', labia: 'sexual',\n  pubic_hair: 'sexual', nude: 'sexual', completely_nude: 'sexual', bottomless: 'sexual',\n  spread_pussy: 'sexual', penis_in_pussy: 'sexual', penis_in_ass: 'sexual',\n  exposed_breasts: 'sexual', exposed_pussy: 'sexual', sexually_suggestive: 'sexual',\n  butt_grab: 'sexual', saliva: 'sexual', foreplay: 'sexual', wet: 'sexual', steam: 'sexual',",
+      "  // 公开版不含成人向细节词表（部位 / 行为 / 体液）：完整版这一段逐词分桶，\n  // 公开版按「按本机词表直写」处理，不内置这份词表。\n  sex: 'sexual', oral: 'sexual', missionary: 'sexual', doggystyle: 'sexual',\n  sex_from_behind: 'sexual', against_wall: 'sexual', facial: 'sexual', nude: 'sexual',\n  completely_nude: 'sexual', butt_grab: 'sexual', saliva: 'sexual',"
+    ]
+  ]],
   ['lib/purge.js', [
     [
       [
@@ -155,11 +196,18 @@ const EXTRA = new Map([
   ].join('\n')]
 ])
 
-const report = { files: 0, skipped: [], arrays: {}, tests: {}, lines: {}, violations: [], dry: DRY }
+const report = { files: 0, skipped: [], oversize: {}, arrays: {}, tests: {}, lines: {}, global: {}, written: [], violations: [], dry: DRY }
 
+/**
+ * 取要处理的文件：tracked + 未被 .gitignore 忽略的未跟踪文件。
+ * 只取 tracked 会把重构后新加的文件（lib/forge/*、lib/refine/*、lib/tags/*、client/*、
+ * server/public/*、docs/PERF.md、scripts/*、types/host.d.ts …）漏在公开版之外，
+ * 于是公开仓库缺一堆被 index.js import 的模块。--others --exclude-standard 让新增文件也进来，
+ * 同时继续遵守 .gitignore（node_modules / tagger.env.cmd / tmp / Windows 设备名占位 CON 都不进来）。
+ */
 function gitFiles() {
-  const out = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
-  return out.split('\n').map(s => s.trim()).filter(s => s !== '')
+  const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: ROOT, encoding: 'utf8' })
+  return out.split('\u0000').filter(s => s !== '')
 }
 
 const readText = rel => readFileSync(path.join(ROOT, rel), 'utf8')
@@ -317,8 +365,20 @@ function applyRules(rel, text) {
   return out
 }
 
+function globalize(text) {
+  let out = text
+  for (const [from, to] of GLOBAL_RULES) {
+    if (from === to) continue
+    const hits = out.split(from).length - 1
+    if (hits === 0) continue
+    report.global[from] = (report.global[from] ?? 0) + hits
+    out = out.split(from).join(to)
+  }
+  return out
+}
+
 function scrub(rel, ext, text) {
-  let out = applyRules(rel, text)
+  let out = applyRules(rel, globalize(text))
   if (ext === '.jsonl') return dropBadLines(out, rel)
   if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
     const marker = ARRAY_RULES.get(rel)
@@ -329,7 +389,11 @@ function scrub(rel, ext, text) {
   return dropBadLines(out, rel)
 }
 
-if (existsSync(DST) && !DRY) rmSync(DST, { recursive: true, force: true })
+if (existsSync(DST) && !DRY) {
+  // 上一版生成的目录里常带只读的 git pack 文件，Windows 上 rmSync 第一次容易 EPERM；
+  // 给足重试次数再抛，避免整个生成流程停在第一步。
+  rmSync(DST, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 })
+}
 if (!DRY) mkdirSync(DST, { recursive: true })
 
 for (const rel of gitFiles()) {
@@ -337,6 +401,13 @@ for (const rel of gitFiles()) {
   const ext = path.extname(rel).toLowerCase()
   let text = OVERRIDE.has(rel) ? readText(OVERRIDE.get(rel)) : readText(rel)
   text = scrub(rel, ext, text)
+  const lineCount = text.split('\n').length
+  if (lineCount > MAX_LINES) {
+    // 超长单文件不进公开版：这种文件基本是把内部实现整段带着走，砍不干净。
+    report.oversize[rel] = lineCount
+    continue
+  }
+  report.written.push(rel)
   if (FORBIDDEN.test(text)) {
     /** @type {Array<[number, string]>} */
     const bad = text.split('\n').map((l, i) => /** @type {[number, string]} */ ([i + 1, l])).filter(([, l]) => FORBIDDEN.test(l))
@@ -353,12 +424,19 @@ for (const rel of gitFiles()) {
 
 for (const [rel, content] of EXTRA) {
   if (FORBIDDEN.test(content)) report.violations.push(rel + '：EXTRA 内容命中红线')
+  report.written.push(rel)
   if (!DRY) {
     const target = path.join(DST, rel)
     mkdirSync(path.dirname(target), { recursive: true })
     writeFileSync(target, content, 'utf8')
   }
   report.files++
+}
+
+// 目录成分自检：构建产物 / 日志 / 缓存一律不许出现；非 dry 时逐个确认确实写到了盘上。
+for (const rel of report.written) {
+  if (BANNED_PATH.test(rel)) report.violations.push(rel + '：构建产物 / 日志 / 缓存不许进公开版')
+  if (!DRY && !existsSync(path.join(DST, rel))) report.violations.push(rel + '：写完之后读不到')
 }
 
 console.log('目标目录：' + DST + (DRY ? '（dry run）' : ''))
@@ -373,6 +451,11 @@ const show = (title, table) => {
 show('数组元素（POSE_HINTS / SEED_TAGS）', report.arrays)
 show('测试用例整块', report.tests)
 show('整行丢弃', report.lines)
+show('本机路径改写', report.global)
+if (Object.keys(report.oversize).length > 0) {
+  console.log('\n超过 ' + MAX_LINES + ' 行整份丢弃：')
+  for (const [k, v] of Object.entries(report.oversize)) console.log('  ' + k + ' × ' + v + ' 行')
+}
 if (report.violations.length > 0) {
   console.log('\n红线未清（共 ' + report.violations.length + ' 处）：')
   for (const v of report.violations) console.log('  ' + v)

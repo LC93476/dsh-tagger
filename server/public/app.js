@@ -62,6 +62,53 @@ function setStatus(id, text, bad) {
   el.className = bad ? "hint err" : "hint";
   el.textContent = text || "";
 }
+// 服务端错误码 → 人话。码表里没有就退回服务端 message，再没有就显示码本身。
+var ERR_TEXT = {
+  "no-llm": "没配置模型接口：设置里填 Base URL + API Key（独立服务也可以用 DSH_TAGGER_* 环境变量）",
+  "no-api-key": "缺 API Key：设置 → 接口密钥",
+  "no-base-url": "缺接口地址：设置 → Base URL（比如 https://api.deepseek.com）",
+  "llm-error": "模型接口报错",
+  "bad-llm": "模型接口返回的形状不对",
+  "http-400": "模型接口返回 400：多半是模型名或参数不对",
+  "timeout": "等超时了：接口太慢或网络断了，可以调大超时再试",
+  "bad-json": "模型回的不是合法 JSON（偶发，重试一次通常就好）",
+  "empty-text": "还没写白话",
+  "empty-prompt": "正向串是空的：先锻造，或手动写几条 tag",
+  "empty-instruction": "还没说要改什么",
+  "empty-positive": "没有可改的正向串：先锻造",
+  "empty-output": "模型这次什么都没给，重试一次",
+  "bad-type": "只收 png / jpg / webp 图片",
+  "empty-file": "这个文件是空的（0 字节）",
+  "too-large": "图片超过 24MB，压一下再传",
+  "no-launch-dir": "先在设置里填 ComfyUI 的安装目录（launchDir），否则服务端不知道往哪写图",
+  "bad-workflow": "工作流模板格式不对（UI 格式要先过 tools/ui2api.mjs 转成 API 格式）",
+  "workflow-not-found": "没有这个工作流模板，检查模板目录",
+  "no-workflow": "模板目录里没有可用工作流",
+  "no-prompt-node": "没找到能写提示词的节点：模板里的 CLIPTextEncode 认不出来",
+  "no-prompt-id": "ComfyUI 没返回 promptId（提交被拒，看 ComfyUI 控制台）",
+  "unreachable": "连不上 ComfyUI：先点「启动 ComfyUI」，或确认 8188 端口",
+  "launch-failed": "拉起 ComfyUI 失败，看服务端日志里的命令与报错",
+  "ui-format": "这个模板是 UI 格式，得先转成 API 格式",
+  "pose-image": "没有这张姿势图",
+  "max-tokens": "模型输出被截断了（服务端已自动翻倍重试，还不行就把上限调高）",
+  "method-not-allowed": "这个接口不接受这种请求方法",
+  "internal": "服务端内部错误，看服务端控制台"
+};
+/** 把 {error, message} 折成一句中文：认得的码给人话，后面再接上服务端原文。 */
+function errText(data, status) {
+  var d = data || {};
+  var code = String(d.error || "");
+  var human = ERR_TEXT[code] || "";
+  var detail = String(d.message || "").trim();
+  var parts = [];
+  if (human) parts.push(human);
+  else if (detail) parts.push(detail);
+  else if (code) parts.push("出错（" + code + "）");
+  if (human && detail && detail !== human) parts.push(detail);
+  var text = parts.join(" · ") || "出错";
+  if (status && status >= 400 && text.indexOf("HTTP") < 0) text += "（HTTP " + status + "）";
+  return text;
+}
 async function loadPoses() {
   var sel = $("pose");
   var res = await api("/poses");
@@ -133,6 +180,7 @@ async function bootInner() {
   }
   fillSettings(s.config);
   syncRefRow();
+  loadUi();
 }
 function syncRefRow() {
   var wid = $("workflow").value || "";
@@ -183,7 +231,7 @@ async function pickRef(file) {
   if (d.ok !== true) {
     state.refName = "";
     status.className = "hint err";
-    status.textContent = "上传失败：" + (d.message || d.error || ("HTTP " + res.status));
+    status.textContent = "上传失败：" + errText(d, res.status);
     return;
   }
   state.refName = d.name;
@@ -303,7 +351,7 @@ async function doForge() {
   var d = res.data || {};
   if (d.ok !== true) {
     $("forge-status").className = "hint err";
-    $("forge-status").textContent = (d.error || "failed") + " —— " + (d.message || "");
+    $("forge-status").textContent = "锻造失败：" + errText(d, res.status);
     return;
   }
   state.result = d;
@@ -333,7 +381,7 @@ async function doRefine() {
   var d = res.data || {};
   if (d.ok !== true) {
     $("refine-status").className = "hint err";
-    $("refine-status").textContent = (d.error || "failed") + " —— " + (d.message || "");
+    $("refine-status").textContent = "精修失败：" + errText(d, res.status);
     return;
   }
   state.result = Object.assign({}, state.result, { tags: d.tags, positive: d.positive, negative: d.negative });
@@ -371,7 +419,7 @@ async function pollJob(promptId) {
   }
   if (d.state === "failed" || d.state === "error") {
     $("gen-status").className = "hint err";
-    $("gen-status").textContent = "失败：" + (d.message || d.state);
+    $("gen-status").textContent = "失败：" + (errText(d, res.status) + " · " + (d.state || "")).replace(/ · $/, "");
     return;
   }
   $("gen-status").textContent = "排队中 / 采样中…（" + (d.state || "?") + (d.queuePosition ? " · 队列第 " + d.queuePosition : "") + "）";
@@ -397,7 +445,7 @@ async function doRun() {
   var d = res.data || {};
   if (d.ok !== true) {
     $("gen-status").className = "hint err";
-    $("gen-status").textContent = (d.error || "failed") + " —— " + (d.message || "");
+    $("gen-status").textContent = "提交失败：" + errText(d, res.status);
     return;
   }
   $("gen-status").className = "hint";
@@ -418,7 +466,7 @@ async function saveLlm() {
   setStatus("llm-status", "保存中…", false);
   var res = await api("/config", { method: "POST", body: JSON.stringify({ patch: { llm: llmPatch() } }) });
   var d = res.data || {};
-  if (!d.config) { setStatus("llm-status", "保存失败：" + (d.message || ("HTTP " + res.status)), true); return }
+  if (!d.config) { setStatus("llm-status", "保存失败：" + errText(d, res.status), true); return }
   fillSettings(d.config);
   var health = await api("/health");
   var h = health.data || {};
@@ -434,7 +482,7 @@ async function testLlm() {
     var extra = (d.models && d.models.length) ? "\n" + d.models.slice(0, 8).join("、") : "";
     setStatus("llm-status", "✓ " + (d.message || "连上了") + " · " + (d.ms || 0) + " ms" + extra, false);
   } else {
-    setStatus("llm-status", "✗ " + (d.message || d.error || "连不上") + (d.endpoint ? "\n" + d.endpoint : ""), true);
+    setStatus("llm-status", "✗ " + errText(d, res.status) + (d.endpoint ? "\n" + d.endpoint : ""), true);
   }
 }
 function fillWorkflows(list, def) {
@@ -460,6 +508,7 @@ async function reloadState() {
   else setPill("comfy-pill", "err", "ComfyUI 没连上");
   var def = s.config && s.config.comfy ? s.config.comfy.defaultWorkflowId : "";
   fillWorkflows(s.workflows || [], def);
+  loadUi();
   return s;
 }
 async function saveComfy() {
@@ -473,7 +522,7 @@ async function saveComfy() {
   };
   var res = await api("/config", { method: "POST", body: JSON.stringify({ patch: { comfy: patch } }) });
   var d = res.data || {};
-  if (!d.config) { setStatus("comfy-status", "保存失败：" + (d.message || ("HTTP " + res.status)), true); return }
+  if (!d.config) { setStatus("comfy-status", "保存失败：" + errText(d, res.status), true); return }
   fillSettings(d.config);
   var s = await reloadState();
   var comfy = s.comfy || {};
@@ -502,10 +551,34 @@ async function launchComfy() {
     setStatus("comfy-status", "已启动 · pid " + (d.pid || "?") + (d.alreadyRunning ? "（本来就在跑）" : ""), false);
     await reloadState();
   } else {
-    setStatus("comfy-status", "启动失败：" + (d.message || d.error || "看控制台日志"), true);
+    setStatus("comfy-status", "启动失败：" + errText(d, res.status), true);
   }
 }
-function bind(id, fn) { $(id).addEventListener("click", fn) }
+// 桌面版是全屏工具，关掉浏览器再回来还要接着用：把出图参数和工作流记在 localStorage（无痕模式会抛，忽略即可）
+var LS_KEY = "dsh-tagger:panel.v1";
+var UI_FIELDS = ["width", "height", "seed", "steps", "cfg", "maxTags", "cnstrength", "refine-mode"];
+function saveUi() {
+  try {
+    var box = { workflow: $("workflow").value || "" };
+    UI_FIELDS.forEach(function (id) { if ($(id)) box[id] = $(id).value });
+    localStorage.setItem(LS_KEY, JSON.stringify(box));
+  } catch (e) { /* 无痕/禁用存储：不影响功能 */ }
+}
+function loadUi() {
+  var raw = null;
+  try { raw = localStorage.getItem(LS_KEY) } catch (e) { return }
+  if (!raw) return;
+  var box = null;
+  try { box = JSON.parse(raw) } catch (e) { return }
+  if (!box || typeof box !== "object") return;
+  UI_FIELDS.forEach(function (id) {
+    if ($(id) && typeof box[id] === "string" && box[id] !== "") $(id).value = box[id];
+  });
+  var wid = typeof box.workflow === "string" ? box.workflow : "";
+  var known = state.workflows.some(function (w) { return w.id === wid });
+  if (wid !== "" && known) $("workflow").value = wid;
+  syncRefRow();
+}function bind(id, fn) { $(id).addEventListener("click", fn) }
 ["fg-repair", "fg-postprocess", "fg-posehints", "fg-candidates"].forEach(function (id) {
   $(id).addEventListener("change", saveForgeToggle);
 });
@@ -537,5 +610,11 @@ $("save-level").addEventListener("click", async function () {
   if (res.data && res.data.purge) setLamp(res.data.purge);
 });
 $("text").addEventListener("keydown", function (e) { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") doForge() });
+// 参数改了就记住：下次开面板还在原样（工作流本身由 fillWorkflows 自己 syncRefRow）
+UI_FIELDS.concat(["workflow"]).forEach(function (id) {
+  var el = $(id);
+  if (!el) return;
+  el.addEventListener("change", saveUi);
+});
 $("refine-text").addEventListener("keydown", function (e) { if (e.key === "Enter") doRefine() });
 boot();

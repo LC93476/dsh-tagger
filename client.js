@@ -3,7 +3,7 @@
  *
  * 这个文件只是**门面**：注册 id、装载 client/ 下的 ESM 子模块、把面板挂到侧边栏。
  * 面板本体在 client/panel.js（状态与动作）、client/view-*.js（渲染）、client/locale.js（文案）……
- * 子模块由宿主按 {PREFIX}/_mod/<name>.js 提供（text/javascript）；测试用 __DSH_TAGGER_MODBASE__ 喂 file:// 基址。
+ * 子模块由宿主按 {PREFIX}/_mod/client/<name>.js 提供（text/javascript）；测试用 __DSH_TAGGER_MODBASE__ 喂 file:// 基址。
  *
  * 三条铁律：
  *   1. 这是 classic script，不能有顶层 import/export —— 只能用动态 import()。
@@ -37,12 +37,14 @@ window.__ModuleLoader__.load({
       return Object.prototype.hasOwnProperty.call(FALLBACK_TEXT, key) ? FALLBACK_TEXT[key] : String(key)
     }
 
-    /** 基址候选：测试注入的 file:// 优先，然后主前缀，最后旧前缀。 */
+    /** 基址候选：测试注入的 file:// 优先，然后主前缀，最后旧前缀。
+     *  注意必须带 client/ 段：宿主的 _mod 路由白名单是 /^client\/[a-z0-9][a-z0-9-]*\.js$/，
+     *  写成 {PREFIX}/_mod/<name>.js 会被判 400 bad-module。 */
     function baseList() {
       const list = []
       const injected = typeof globalThis !== 'undefined' ? globalThis[MODBASE_KEY] : ''
       if (typeof injected === 'string' && injected !== '') list.push(injected.endsWith('/') ? injected : injected + '/')
-      list.push(API + '/_mod/', LEGACY_API + '/_mod/')
+      list.push(API + '/_mod/client/', LEGACY_API + '/_mod/client/')
       return list
     }
 
