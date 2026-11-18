@@ -425,12 +425,28 @@ export function createLlmShim(options = {}) {
 }
 
 /**
+ * @typedef {object} ShimLogger
+ * @property {(...args: any[]) => void} [info]
+ * @property {(...args: any[]) => void} [warn]
+ * @property {(...args: any[]) => void} [error]
+ */
+
+/**
+ * @typedef {object} WebServerShimOptions
+ * @property {string} [host]
+ * @property {number} [port]
+ * @property {ShimLogger} [logger]
+ */
+
+/**
  * webServer 替身：node:http + 一张前缀/精确路由表。
  *
  * 与 DSH 的 webServer 服务同形：register({ kind:'prefix'|'exact', path, handler }) → dispose。
  * 重复注册同 kind + path 会抛错（消息里带 "duplicate prefix route"，与 index.js 的容错分支对得上）。
  */
-export function createWebServerShim({ host = '127.0.0.1', port = 0, logger } = {}) {
+export function createWebServerShim(options = {}) {
+  const { host = '127.0.0.1', port = 0, logger } = options
+  /** @type {ShimLogger} */
   const log = logger ?? {}
   const entries = []
   const sockets = new Set()
@@ -466,15 +482,26 @@ export function createWebServerShim({ host = '127.0.0.1', port = 0, logger } = {
     res.end(JSON.stringify(payload))
   }
 
+  /**
+   * 原始路径：只切掉 ?query 与 #hash，绝不做 '..' 折叠。
+   * 静态资源（/public/*）要靠原始路径判断路径穿越——new URL() 会把 '/public/../index.js'
+   * 规范化成 '/index.js'，防护就白做了。
+   */
+  function rawPathOf(rawUrl) {
+    const text = str(rawUrl) || '/'
+    const cut = text.search(/[?#]/)
+    const kept = cut >= 0 ? text.slice(0, cut) : text
+    return kept === '' ? '/' : kept
+  }
+
   async function handle(req, res) {
-    const rawUrl = str(req.url) || '/'
-    const url = new URL(rawUrl, 'http://' + (str(req.headers?.host) || 'localhost'))
-    const entry = pick(url.pathname)
+    const pathname = rawPathOf(req.url)
+    const entry = pick(pathname)
     if (entry === undefined) {
       sendJson(res, 404, {
         ok: false,
         error: 'not-found',
-        message: '没有这个路径：' + url.pathname,
+        message: '没有这个路径：' + pathname,
         hint: '插件接口在 /tagger/api 下；根路径 / 是 web 版入口。',
       })
       return
@@ -482,7 +509,7 @@ export function createWebServerShim({ host = '127.0.0.1', port = 0, logger } = {
     try {
       await entry.handler(req, res)
     } catch (error) {
-      log.warn?.('[tagger] ' + url.pathname + ' 失败：' + msgOf(error))
+      log.warn?.('[tagger] ' + pathname + ' 失败：' + msgOf(error))
       if (res.headersSent === true) res.destroy()
       else sendJson(res, 500, { ok: false, error: 'internal', message: msgOf(error) })
     }
@@ -615,8 +642,20 @@ export function createToolsShim() {
   }
 }
 
-/** 最小 ctx：createRuntime 只需要 get()，apply 还会用 effect()。 */
-export function createContext({ llm, webServer, tools, extra } = {}) {
+/**
+ * @typedef {object} ContextServices
+ * @property {any} [llm]
+ * @property {any} [webServer]
+ * @property {any} [tools]
+ * @property {Record<string, any>} [extra]
+ */
+
+/**
+ * 最小 ctx：createRuntime 只需要 get()，apply 还会用 effect()。
+ * @param {ContextServices} [deps]
+ */
+export function createContext(deps = {}) {
+  const { llm, webServer, tools, extra } = deps
   const services = new Map()
   if (llm !== undefined) services.set('llm', llm)
   if (webServer !== undefined) services.set('webServer', webServer)

@@ -15,7 +15,7 @@
  *   1. 没有内置 key、没有内置地址：缺配置就如实报 llmReady:false，接口回清晰错误。
  *   2. SIGINT / SIGTERM 关服务走 gracefully：不再接新连接，等在飞的请求收尾，超时再来硬的。
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -301,7 +301,100 @@ try {
 } catch (error) {
   rt.log.info('旧前缀 ' + LEGACY_PREFIX + ' 未注册（不影响）：' + (error instanceof Error ? error.message : String(error)))
 }
-const PANEL_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'panel.html')
+const SELF_DIR = path.dirname(fileURLToPath(import.meta.url))
+const PANEL_FILE = path.join(SELF_DIR, 'panel.html')
+// 面板拆出来的静态资源（样式 / 脚本）：只从这里读，别的目录一律不认。
+const PUBLIC_DIR = path.resolve(SELF_DIR, 'public')
+// 只放行面板真正用到的这几种类型；未知扩展名当 404，不猜。
+const PUBLIC_MIME = new Map([
+  ['.css', 'text/css; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.svg', 'image/svg+xml'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+])
+
+/**
+ * 把 /public/xxx 映射到 PUBLIC_DIR 下的普通文件。
+ *
+ * 三重防线，任何一条不过就返回 error，绝不把盘上别的东西吐出去：
+ *   1. 解码后不允许出现 '..' 段或空段（'//' 这类）；
+ *   2. path.resolve 之后必须仍在 PUBLIC_DIR 里面（挡住 '..\' 这种 Windows 分隔符绕过）；
+ *   3. statSync 必须是普通文件（目录、符号链接到别处都不算）。
+ */
+function resolvePublicPath(rawUrl) {
+  const text = str(rawUrl) || '/'
+  const cut = text.search(/[?#]/)
+  const rawPath = cut >= 0 ? text.slice(0, cut) : text
+  let decoded
+  try {
+    decoded = decodeURIComponent(rawPath)
+  } catch {
+    return { error: 'bad-path' }
+  }
+  if (!decoded.startsWith('/public/')) return { error: 'bad-path' }
+  const rel = decoded.slice('/public/'.length)
+  if (rel === '' || rel.includes('\u0000')) return { error: 'bad-path' }
+  const segments = rel.split('/')
+  for (const segment of segments) {
+    if (segment === '' || segment === '.' || segment === '..') return { error: 'bad-path' }
+  }
+  const full = path.resolve(PUBLIC_DIR, rel)
+  if (!full.startsWith(PUBLIC_DIR + path.sep)) return { error: 'bad-path' }
+  const type = PUBLIC_MIME.get(path.extname(full).toLowerCase())
+  if (type === undefined) return { error: 'not-found' }
+  let stat
+  try {
+    stat = statSync(full)
+  } catch {
+    return { error: 'not-found' }
+  }
+  if (stat.isFile() !== true) return { error: 'not-found' }
+  return { file: full, type, size: stat.size }
+}
+
+/** /public/* 的静态响应：no-store（改完刷新就生效），坏路径 400，找不到 404，其余方式 405。 */
+async function servePublic(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', Allow: 'GET, HEAD' })
+    res.end(JSON.stringify({ ok: false, error: 'method-not-allowed', message: '/public/* 只支持 GET。' }))
+    return
+  }
+  const found = resolvePublicPath(req.url)
+  if (found.error !== undefined) {
+    const status = found.error === 'bad-path' ? 400 : 404
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: found.error,
+        message: found.error === 'bad-path' ? '路径不合法（只允许 server/public 下的普通文件）。' : '没有这个静态资源：' + str(req.url),
+      }),
+    )
+    return
+  }
+  let body
+  try {
+    body = readFileSync(found.file)
+  } catch (error) {
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+    res.end(JSON.stringify({ ok: false, error: 'not-found', message: msgOfStatic(error) }))
+    return
+  }
+  res.writeHead(200, {
+    'Content-Type': found.type,
+    'Content-Length': String(body.byteLength),
+    'Cache-Control': 'no-store',
+  })
+  res.end(req.method === 'HEAD' ? undefined : body)
+}
+
+function msgOfStatic(error) {
+  return error instanceof Error ? error.message : String(error)
+}
 
 /** 面板 HTML：每次读盘，改完刷新浏览器就生效（不重启）。读不到就退回信息页，别 500。 */
 function panelHtml() {
@@ -336,6 +429,9 @@ function registerHtmlPage(routePath, getHtml) {
     }),
   )
 }
+
+// 面板的样式与脚本：server/public/ 下的普通文件，带 MIME 与路径穿越防护。
+disposers.push(webServer.register({ kind: 'prefix', path: '/public', handler: servePublic }))
 
 // 面板：/ 与 /panel 都是锻造台；/about 是原来的信息页（健康状态 + 接口清单）。
 registerHtmlPage('/', panelHtml)
