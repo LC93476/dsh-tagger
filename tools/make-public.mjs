@@ -15,7 +15,7 @@
  * 用法：node tools/make-public.mjs [--dst <目录>] [--dry]
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -390,9 +390,13 @@ function scrub(rel, ext, text) {
 }
 
 if (existsSync(DST) && !DRY) {
+  // 只清内容，保留 .git：公开版仓库就是在 DST 里初始化的，整目录删掉会把提交历史一起毁掉。
   // 上一版生成的目录里常带只读的 git pack 文件，Windows 上 rmSync 第一次容易 EPERM；
   // 给足重试次数再抛，避免整个生成流程停在第一步。
-  rmSync(DST, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 })
+  for (const entry of readdirSync(DST)) {
+    if (entry === '.git') continue
+    rmSync(path.join(DST, entry), { recursive: true, force: true, maxRetries: 8, retryDelay: 150 })
+  }
 }
 if (!DRY) mkdirSync(DST, { recursive: true })
 
