@@ -171,10 +171,15 @@ const BLOCK_RULES = new Map([
   ]]
 ])
 
-/** 大数组按元素过滤（顶层逗号切分，尊重括号与字符串）。 */
+/**
+ * 大数组按元素过滤（顶层逗号切分，尊重括号与字符串）。
+ *
+ * 注意：Seed 词条已经不是 JS 数组了（Phase 6.2 外置到 data/tags/seed/*.jsonl），
+ * 所以这里不再有 lib/seed-tags.js 的锚点 —— 那些 .jsonl 走的是按行的 FORBIDDEN 过滤
+ * （dropBadLines），效果一样：露骨词的行整行丢掉，不会进公开版。
+ */
 const ARRAY_RULES = new Map([
-  ['lib/zh-intent.js', 'export const POSE_HINTS = ['],
-  ['lib/seed-tags.js', 'export const SEED_TAGS = [']
+  ['lib/zh-intent.js', 'export const POSE_HINTS = [']
 ])
 
 /** 公开版的测试补丁：完整版依赖内置露骨词表才成立的断言，公开版换成说明。 */

@@ -40,31 +40,44 @@ HTTP 前缀 `/tagger/api`，旧前缀 `/prompt-forge/api` 同时兼容。
 ## 目录
 
 ```
-index.js                宿主入口（HTTP 前缀 + MCP 工具）
-client.js               侧边栏面板门面（实现拆在 client/）
-client/                 面板子模块（locale / api / state / ui / views）
+index.js                宿主入口，只做编排（112 行）：装配 runtime + 注册前缀 + 注册 MCP
+lib/cordis/adapter.js   宿主适配层：日志 / 端点拼接 / llm 设置 / 最小 ctx（shims 与 index 共用）
+lib/cordis/config.js    PLUGIN / VERSION / configView(rt) / persistPatch
+lib/cordis/commands.js  模型工具注册 + 系统提示词注入（受 purge.injectIntoAgentPrompt 控制）
+lib/cordis/handlers.js  26 条 HTTP 路由（/forge /refine /run /job /upload /pose-thumb /spi /config …）
+lib/config.js           默认配置与归一化（DEFAULTS 是配置的唯一真相）
+client.js               侧边栏面板门面（**已暂停开发**，实现拆在 client/）
+client/                 面板子模块（locale / api / state / ui / views），暂停开发
 lib/tags.js             标签索引统一入口（实现拆在 lib/tags/）
 lib/tags/text.js        归一化/键名/转义/权重写法（纯函数）
-lib/tags/loader.js      读盘、overlay 签名、建索引
+lib/tags/loader.js      读盘、overlay 签名、seed 词条、建索引
 lib/tags/matcher.js     检索、canonicalize、中文对照、近邻建议
 lib/tags/index.js       懒加载、热重载、进程内单例（resetTagIndexCache）
-lib/forge.js            锻造器
+lib/forge.js            锻造器门面（实现拆在 lib/forge/）
 lib/repair.js           词形修复（差一点就对 → 库里真词）
 lib/postprocess.js      去重、降权、13 段排序、裁剪门面（规则表在 lib/postprocess/rules.js）
 lib/zh-intent.js        中文姿势/视角意图与候选注入
 lib/refine.js           二次精修门面（实现拆在 lib/refine/）
 lib/purge.js            破甲系统提示词
-lib/comfy.js            ComfyUI 投递
+lib/comfy.js            ComfyUI 兼容门面（实现拆在 lib/comfy/）
+lib/comfy/index.js      编排 + HTTP：ping / listWorkflows / submit / status / waitFor / image
+lib/comfy/workflow.js   纯函数：格式判定、正负向映射、vars 注入、schema、历史摘要
+lib/comfy/upload.js     参考图落 ComfyUI 的 input/
 lib/backend-common.js   后端公共层（HTTP / 超时 / 错误归一 / 轮询）
+lib/seed-tags.js        seed 词条薄入口（词条本体在 data/tags/seed/*.jsonl）
 lib/mcp.js              MCP 服务端
 lib/spi.js              扩展注册表
-lib/routes.js           路由与 dispatch
-lib/config.js           默认配置与归一化
-server/standalone.mjs   脱离 DSH 的独立服务
-server/public/          Web 面板静态资源（panel.css / api.js / state.js / app.js）
+lib/routes.js           路由与 dispatch（含 /* 通配）
+lib/poses.js            姿势目录与缩略图查找
+server/standalone.mjs   脱离 DSH 的独立服务（静态资源 no-cache + ETag）
+server/shims.mjs        独立模式最小 ctx（端点逻辑委托 lib/cordis/adapter.js）
+server/public/          Web 面板静态资源：panel.css / api.js / state.js / render.js / settings.js / history.js / app.js
+scripts/                run-tests.mjs / check-tags.mjs / bench.mjs / build-tags.mjs / push-to-github.ps1
 scripts/win/            Windows 启停脚本（根目录 .cmd/.vbs 只是转发）
+data/tags/*.jsonl       随包 overlay 词表（nsfw / 姿势视角 / 画质 / 场景）
+data/tags/seed/         内置 seed 词条，13 个 jsonl（387 行）
 tools/                  开发期工具（见下）
-tests/                  16 个测试套件
+tests/                  17 个测试套件
 docs/CONTRACT.md        核心契约（模块 / 配置 / 路由 / SPI / 客户端）
 docs/API.md             接口手册（HTTP 路由 + MCP 工具）
 docs/PERF.md            实测性能数字与健壮性清单（scripts/bench.mjs）
@@ -80,41 +93,39 @@ docs/PERF.md            实测性能数字与健壮性清单（scripts/bench.mjs
 | `scripts/build-tags.mjs` | 校验/统计词表覆盖情况 | 不要 |
 ```
 
-## 测试与静态检查
+## 检查与测试（npm 脚本）
 
-本机 bash 没有 node，用 Electron 当 node：
+```bash
+npm run check:tags   # 词表结构自检：data/tags/*.jsonl 每行合法 + 同文件内 tag 不重复
+npm run typecheck    # tsc --noEmit -p tsconfig.json（allowJs + checkJs，不进构建）
+npm test             # 全量测试，串行
+npm run check        # 上面三道连跑
+npm run bench        # 本地计算层基准，超预算 exit 1（见 docs/PERF.md）
+```
+
+`npm test` 走 `scripts/run-tests.mjs` 而不是裸 `node --test`：
+
+- **必须串行**（`--test-concurrency=1`）：几个套件会读同一份默认词表目录，进程并行时可能撞上另一个进程
+  正在重写 overlay，表现为偶发 1 条失败，单跑必绿。这不是业务 bug，但门禁里不许并行。
+- 这个参数是 Node 20.11 才有的，`engines` 定的是 `>=18.18.0`，所以由脚本按版本决定加不加，
+  老版本给一句提示后并行跑，不会因为参数不认识整条命令报错。
+
+17 个套件：`comfy` `forge` `http` `mcp` `poses` `postprocess` `refine` `render` `repair` `shim`
+`standalone` `tags` `tags-pose` `ui2api` `upload` `zh-intent` `cordis`。
+（没装 Danbooru 词表的机器上，需要真库的三条用例会 skip 而不是失败，见 `tests/_lib-guard.mjs`。）
+
+本机 bash 没有 `node` 命令时，用宿主自带的 Electron 当 node：
 
 ```bash
 cd "/d/DSh tagger"
-ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe" \
-  --test --test-concurrency=1 tests/*.test.mjs
+export ELECTRON_RUN_AS_NODE=1
+R="C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe"
+"$R" scripts/run-tests.mjs          # = npm test
+"$R" scripts/check-tags.mjs         # = npm run check:tags
 ```
 
-（`--test` 必须逐文件列；给目录会 MODULE_NOT_FOUND。`--test-concurrency=1` 不能省：几个套件会读同一份
-默认词表目录，进程并行时可能撞上另一个进程正在重写 overlay，表现为偶发 1 条失败，单跑必绿。）
-
-16 个套件：`comfy` `forge` `http` `mcp` `poses` `postprocess` `refine` `render` `repair` `shim`
-`standalone` `tags` `tags-pose` `ui2api` `upload` `zh-intent`。
-
-词表结构自检（`data/tags/*.jsonl` 每行合法性 + 同文件内 tag 重复检查，CI 第一道门禁）：
-
-```bash
-node scripts/check-tags.mjs          # 有问题 exit 1，并列出「文件:行号 原因」
-```
-
-类型检查（不进构建，纯检查；`tsconfig.json` 是 `allowJs` + `checkJs` + `noEmit`）：
-
-```bash
-npm i --no-save typescript @types/node   # 只在本地查，不写进依赖
-npx tsc --noEmit -p tsconfig.json
-```
-
-CI 跑同样的三道门禁（词表自检 → 类型检查 → 全量测试），配置在 `.github/workflows/ci.yml`。
-
-> 注意：这个 workflow 文件**暂时没有随仓提交**。当前推送用的 GitHub token 只有 `repo` scope，
-> GitHub 会拒绝任何创建/修改 `.github/workflows/*.yml` 的推送（`refusing to allow a Personal Access Token to
-> create or update workflow … without workflow scope`）。给 token 加上 `workflow` scope 后，删掉 `.gitignore`
-> 里那两行、`git add .github/workflows/ci.yml && git commit && git push` 就补齐了。本地等价命令就是上面这三条。
+CI 跑同样的三道门禁（`check:tags` → `typecheck` → `test`），配置在 `.github/workflows/ci.yml`，
+windows-latest + Node 20，步骤直接调上面这些 npm 脚本。
 
 ## 装了哪两个 profile
 
