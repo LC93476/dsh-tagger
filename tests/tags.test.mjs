@@ -9,10 +9,14 @@
  * 无外部依赖：node:test + node:assert。
  */
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { createTagIndex, escapeParens, parseTerm, unescapeTag } from '../lib/tags.js'
+import { fileURLToPath } from 'node:url'
+import tagsEntry, * as tagsNs from '../lib/tags.js'
+import { createTagIndex, escapeParens, parseTerm, resetTagIndexCache, unescapeTag } from '../lib/tags.js'
+import { runNormalize, summaryToJson, summaryToText } from '../scripts/build-tags.mjs'
 
 const silent = { info() {}, warn() {}, error() {} }
 const scratch = path.join(os.tmpdir(), 'dsh-prompt-forge-tags-test-' + process.pid)
@@ -330,3 +334,108 @@ test('ensureFresh：词表文件一改，下一次查就热重载，不用重启
   // 指纹稳定后再次调用不该反复重建
   assert.equal(await index.ensureFresh(), false)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 拆分后的结构：lib/tags.js 只做转发，实现分在 lib/tags/ 四个文件里。
+// 这几条是「拆分没走样」的护栏：体积、单例、导出面、build-tags 统计。
+
+const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+
+test('拆分体积：lib/tags.js 是薄入口（< 8KB），子模块各自 < 30KB', () => {
+  const entryFile = path.join(repoRoot, 'lib', 'tags.js')
+  const entrySize = fs.statSync(entryFile).size
+  assert.ok(entrySize > 0, 'lib/tags.js 不存在')
+  assert.ok(entrySize < 8 * 1024, 'lib/tags.js 应只剩转发，实际 ' + entrySize + ' 字节')
+
+  for (const name of ['text.js', 'loader.js', 'matcher.js', 'index.js']) {
+    const file = path.join(repoRoot, 'lib', 'tags', name)
+    const size = fs.statSync(file).size
+    assert.ok(size > 0, file + ' 不存在')
+    assert.ok(size < 30 * 1024, name + ' 超过 30KB：' + size)
+  }
+})
+
+test('单例：同参数 createTagIndex 复用同一个实例，resetTagIndexCache 后重建', async () => {
+  const dir = path.join(scratch, 'singleton')
+  const first = createTagIndex({ dir, probeDefaults: false, logger: silent })
+  const second = createTagIndex({ dir, probeDefaults: false, logger: silent })
+  assert.equal(first, second, '同参数应复用实例，别把 99k 的索引建两份')
+
+  // 参数不同就是另一份（dataDirs 变了意味着数据源变了）
+  const other = createTagIndex({ dir, probeDefaults: false, dataDirs: [path.join(dir, 'nope')], logger: silent })
+  assert.notEqual(first, other)
+
+  resetTagIndexCache()
+  const fresh = createTagIndex({ dir, probeDefaults: false, logger: silent })
+  assert.notEqual(first, fresh, 'resetTagIndexCache 之后应新建')
+
+  await first.ready()
+  await fresh.ready()
+  assert.equal(first.stats().loaded > 100, true)
+  assert.equal(fresh.stats().ready, true)
+})
+
+test('导出面：老路径 lib/tags.js 的导出一个都不少（default 也是 createTagIndex）', () => {
+  for (const name of [
+    'createTagIndex', 'resetTagIndexCache', 'suggestTags',
+    'discoverDataDir', 'loadTagEntries', 'pluginRoot', 'overlayDirs',
+    'escapeParens', 'normalizeKind', 'primaryChineseName', 'unescapeTag', 'parseTerm',
+  ]) {
+    assert.equal(typeof tagsNs[name], 'function', '缺少导出 ' + name)
+  }
+  assert.equal(tagsEntry, tagsNs.createTagIndex, 'default 应是 createTagIndex')
+  assert.equal(tagsNs.createTagIndex, createTagIndex)
+})
+
+test('build-tags：runNormalize 报告总条目 / 分类计数 / 重复 tag / 缺中文 / overlay 统计', async () => {
+  const from = path.join(scratch, 'build-src')
+  const out = path.join(scratch, 'build-out')
+  fs.mkdirSync(from, { recursive: true })
+  const rows = [
+    { tag: 'zz_build_probe_a', kind: 'general', postCount: 10, names: ['zz探针甲'] },
+    { tag: 'zz_build_probe_b', kind: 'general', postCount: 5 },
+  ]
+  fs.writeFileSync(path.join(from, 'general.jsonl'), rows.map(row => JSON.stringify(row)).join('\n') + '\n', 'utf8')
+  // 同名再来一次（跨文件重复），并且这次带中文与更高热度
+  fs.writeFileSync(
+    path.join(from, 'general-extra.jsonl'),
+    [
+      JSON.stringify({ tag: 'zz_build_probe_a', kind: 'general', postCount: 30, cn: 'zz甲补名' }),
+      JSON.stringify({ tag: 'zz_build_probe_artist', kind: 'artist', postCount: 7, names: ['zz画家'] }),
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+
+  const summary = await runNormalize({ from, out, quiet: true })
+  assert.equal(summary.ok, true, summaryToText(summary))
+  assert.equal(summary.destination, path.resolve(out))
+  assert.equal(summary.total, 3, '重复 tag 合并后应是 3 条')
+  assert.deepEqual(summary.byKind, { general: 2, character: 0, copyright: 0, artist: 1 })
+  assert.deepEqual(summary.duplicates, { tags: 1, rows: 1 })
+  assert.equal(summary.missingChinese, 1, 'zz_build_probe_b 没有中文名')
+  assert.equal(summary.bad, 0)
+  assert.equal(summary.sourceFiles.length, 2)
+
+  // overlay 统计：至少能数出包内词表，且我们自己造的 zz_ 词不在里面
+  assert.ok(summary.overlay.files >= 1, JSON.stringify(summary.overlay))
+  assert.ok(summary.overlay.tags > 0)
+  assert.equal(summary.overlay.covered, 0, 'zz_ 开头的自造词不该被 overlay 认领')
+  assert.equal(summary.overlay.missing, summary.overlay.tags)
+
+  // 写出来的行按热度降序，重复记录只升不降
+  const written = fs.readFileSync(path.join(out, 'general.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+  assert.deepEqual(written.map(row => row.tag), ['zz_build_probe_a', 'zz_build_probe_b'])
+  assert.equal(written[0].postCount, 30)
+  assert.ok(written[0].names.includes('zz探针甲'))
+  assert.ok(written[0].names.includes('zz甲补名'))
+  assert.ok(fs.existsSync(path.join(out, 'artists.jsonl')))
+  assert.ok(fs.existsSync(path.join(out, 'meta.json')))
+
+  // --json 输出能原样解析回来
+  const parsed = JSON.parse(summaryToJson(summary))
+  assert.equal(parsed.total, summary.total)
+  assert.equal(parsed.duplicates.tags, 1)
+  assert.ok(summaryToText(summary).includes('缺中文 1 条'))
+})
+

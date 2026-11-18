@@ -110,6 +110,16 @@ function makeRefiner(overrides = {}) {
   }
 }
 
+/**
+ * 测试里注入的假实现：每个都是记账对象，字段形状各用例自己关心。
+ * @typedef {object} McpTestDeps
+ * @property {any} [forge]
+ * @property {any} [comfy]
+ * @property {any} [tags]
+ * @property {any} [refine]
+ */
+
+/** @param {McpTestDeps} [deps] */
 function build(deps = {}) {
   const forge = 'forge' in deps ? deps.forge : makeForge()
   const comfy = 'comfy' in deps ? deps.comfy : makeComfy()
@@ -198,9 +208,11 @@ test('错误码：未知方法 -32601、缺 method -32600、非对象 -32600', a
   assert.equal(unknown.error.code, -32601)
   assert.equal(unknown.id, 'x1')
 
+  /** @type {any} */
   const noMethod = await handler.handle({ jsonrpc: '2.0', id: 'x2' })
   assert.equal(noMethod.error.code, -32600)
 
+  /** @type {any} */
   const notObject = await handler.handle('not-a-message')
   assert.equal(notObject.error.code, -32600)
   assert.equal(notObject.id, null)
@@ -470,7 +482,7 @@ test('客户端只读接口：handler.tools() 给的是快照，不含 run', asy
   const { handler } = build()
   const snapshot = handler.tools()
   assert.equal(snapshot.length, 6)
-  assert.equal(snapshot[0].run, undefined)
+  assert.equal(/** @type {any} */ (snapshot[0]).run, undefined)
   assert.equal(handler.protocolVersion, PROTOCOL_VERSION)
   assert.equal(handler.serverInfo.name, SERVER_INFO.name)
   assert.equal(typeof handler.handle, 'function')

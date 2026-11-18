@@ -84,13 +84,19 @@ function fakeCtx(llm) {
   }
 }
 
+/** @param {import('node:net').Server} server @returns {number} */
+function portOf(server) {
+  const address = server.address()
+  return typeof address === 'object' && address !== null ? address.port : 0
+}
+
 async function withServer(rawConfig, run, llmOverride) {
   const llm = llmOverride ?? fakeLlm()
   const ctx = fakeCtx(llm)
   const rt = createRuntime(ctx, { ui: { keepHistory: 3 }, ...rawConfig })
   const server = http.createServer(createDispatch(createHandlers(rt), rt.log))
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const { port } = server.address()
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = portOf(server)
   const base = 'http://127.0.0.1:' + port + PREFIX
   try {
     await run({ base, rt, llm, ctx })
@@ -226,8 +232,8 @@ test('POST /forge：options.purgeLevel / maxTags / standards 覆盖本次调用'
   const ctx = fakeCtx(llm)
   const rt = createRuntime(ctx, {})
   const server = http.createServer(createDispatch(createHandlers(rt), rt.log))
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const base = 'http://127.0.0.1:' + server.address().port + PREFIX
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const base = 'http://127.0.0.1:' + portOf(server) + PREFIX
   try {
     const { body } = await getJson(base + '/forge', {
       method: 'POST',
@@ -272,8 +278,8 @@ test('POST /forge：空输入 400，llm 缺席 502 且错误可读', async () =>
   ctx.get = name => (name === 'llm' ? undefined : fakeCtx(llm).get(name))
   const rt = createRuntime(ctx, {})
   const server = http.createServer(createDispatch(createHandlers(rt), rt.log))
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const base = 'http://127.0.0.1:' + server.address().port + PREFIX
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const base = 'http://127.0.0.1:' + portOf(server) + PREFIX
   try {
     const res = await getJson(base + '/forge', {
       method: 'POST',
@@ -451,8 +457,8 @@ test('POST /forge：NSFW tag 全部被词表认领，不再报「不在库里」
   assert.ok(indexStats.overlayFiles.length >= 1, '包内 overlay 没读到：' + JSON.stringify(indexStats.sourceFiles))
   assert.ok(indexStats.loaded > 1000, '索引只有 seed：' + indexStats.loaded)
   const server = http.createServer(createDispatch(createHandlers(rt), rt.log))
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const base = 'http://127.0.0.1:' + server.address().port + PREFIX
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const base = 'http://127.0.0.1:' + portOf(server) + PREFIX
   try {
     const { body: forged } = await getJson(base + '/forge', {
       method: 'POST',
@@ -573,3 +579,25 @@ test('POST /llm/probe：地址或 key 缺一个就 400（不偷偷联网），�
     assert.equal(typeof unreachable.body.message, 'string')
   })
 })
+
+test('GET /_mod/*：只吐 client/ 下一层的 js 模块，坏名字 400、缺文件 404', async () => {
+  await withServer({}, async ({ base }) => {
+    // 只认 client/<小写字母数字连字符>.js：大写、带子目录、不在 client/ 下都拒绝
+    const badPaths = ['/_mod/client/Panel.js', '/_mod/panel.js', '/_mod/client/sub/panel.js', '/_mod/client/panel.mjs']
+    for (const badPath of badPaths) {
+      const { status, body } = await getJson(base + badPath)
+      assert.equal(status, 400, badPath + ' 应当 400')
+      assert.equal(body.error, 'bad-module')
+    }
+
+    // 名字合法但文件不存在：404 且不吐堆栈
+    const missing = await getJson(base + '/_mod/client/zzz-no-such-module.js')
+    assert.equal(missing.status, 404)
+    assert.equal(missing.body.error, 'no-module')
+
+    // 通配路由不能抢掉精确路由
+    const health = await getJson(base + '/health')
+    assert.equal(health.status, 200)
+  })
+})
+

@@ -6,7 +6,8 @@
  *
  * 覆盖：tag 规范化 / 13 段归类 / 真同义去重 / 上位词降权不删 / 降权幂等 / 词序（服装先于镜头）/
  * 补人数（只补 1girl、1boy）/ 人数词存在与多人白话一律不补 / 男性线索与「吉他、其他」误判 /
- * 超上限裁剪 / 未命中词丢弃 / 脏输入不崩 / 与真库对齐（保留下来的都是 matched 真词）。
+ * 超上限裁剪 / 未命中词丢弃 / 脏输入不崩 / 与真库对齐（保留下来的都是 matched 真词）/
+ * 拆分后的结构约束：门面导出面不变、规则层与门面共享同一份常量（task-17）。
  * 无外部依赖：node:test + node:assert + 真库索引。
  */
 import assert from 'node:assert/strict'
@@ -32,10 +33,13 @@ import {
   orderRows,
   trimRows,
 } from '../lib/postprocess.js'
+import * as ppNamespace from '../lib/postprocess.js'
+import * as rulesNamespace from '../lib/postprocess/rules.js'
 
 const silent = { info() {}, warn() {}, error() {}, debug() {} }
 const scratch = path.join(os.tmpdir(), 'dsh-prompt-postprocess-test-' + process.pid)
-const live = createTagIndex({ dir: scratch, logger: silent })
+// lib/tags 的 createTagIndex JSDoc 还没列 dir/logger（task-19 的活），这里局部收口
+const live = createTagIndex(/** @type {any} */ ({ dir: scratch, logger: silent }))
 const pp = createPostProcessor({})
 
 // 反斜杠在多层字符串里极易数错，统一用码点构造
@@ -302,4 +306,35 @@ test('orderRows / trimRows 可直接单用：稳定排序、裁剪不重排', ()
   assert.deepEqual(tagsOf(trimmed.rows), ['school_uniform'])
   assert.equal(trimmed.changes.length, 1)
   assert.deepEqual(tagsOf(trimRows(ordered.rows, 0).rows), ['school_uniform', 'close-up'], '不设上限就原样返回')
+})
+
+// --- 拆分后的结构约束（task-17）：门面导出面不变，规则层与门面共享同一份常量 ---
+
+const FACADE_EXPORTS = [
+  'BUCKETS', 'BUCKET_INDEX', 'COUNT_WORDS', 'EXACT_BUCKET', 'SUPERSET_PAIRS', 'SUPERSET_WEIGHT',
+  'SYNONYM_GROUPS', 'TOKEN_RULES', 'bucketLabel', 'clampWeight', 'classifyBucket', 'createPostProcessor',
+  'dedupeRows', 'default', 'detectGender', 'escapeParens', 'fillSubject', 'formatRows', 'mergeSupersets',
+  'normTag', 'normalizeRows', 'orderRows', 'parseRow', 'round2', 'trimRows',
+]
+
+test('门面 lib/postprocess.js 的导出面与拆分前一致，default 就是 createPostProcessor', () => {
+  assert.deepEqual(Object.keys(ppNamespace).sort(), FACADE_EXPORTS.slice().sort())
+  assert.equal(ppNamespace.default, ppNamespace.createPostProcessor)
+  assert.equal(typeof ppNamespace.createPostProcessor({}).apply, 'function')
+})
+
+test('规则层 rules.js 与门面共享同一份常量对象，实现细节不对外泄漏', () => {
+  assert.equal(ppNamespace.BUCKETS, rulesNamespace.BUCKETS)
+  assert.equal(ppNamespace.BUCKET_INDEX, rulesNamespace.BUCKET_INDEX)
+  assert.equal(ppNamespace.SUPERSET_PAIRS, rulesNamespace.SUPERSET_PAIRS)
+  assert.equal(ppNamespace.SYNONYM_GROUPS, rulesNamespace.SYNONYM_GROUPS)
+  assert.equal(ppNamespace.EXACT_BUCKET, rulesNamespace.EXACT_BUCKET)
+  assert.equal(ppNamespace.TOKEN_RULES, rulesNamespace.TOKEN_RULES)
+  assert.equal(ppNamespace.COUNT_WORDS, rulesNamespace.COUNT_WORDS)
+  assert.equal(rulesNamespace.SUPERSET_WEIGHT, 0.85)
+  assert.equal(rulesNamespace.BUCKETS.length, 13)
+  // COUNT_RE / FEMALE_RE / MALE_RE 仍是内部实现，门面不该导出
+  assert.equal(Object.keys(ppNamespace).includes('COUNT_RE'), false)
+  assert.equal(Object.keys(ppNamespace).includes('FEMALE_RE'), false)
+  assert.equal(Object.keys(ppNamespace).includes('MALE_RE'), false)
 })

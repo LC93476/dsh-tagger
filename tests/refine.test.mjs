@@ -102,6 +102,7 @@ function jsonStream(value, options = {}) {
   ])
 }
 
+/** @param {{ config?: object, llm?: object, tags?: object, spi?: object }} [deps] 缺省项各自回落到默认 */
 function makeRefiner({ config, llm, tags, spi } = {}) {
   return createRefiner({
     config: config ?? makeConfig(),

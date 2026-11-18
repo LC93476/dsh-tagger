@@ -20,7 +20,8 @@ import { createTagIndex, suggestTags as modSuggest } from '../lib/tags.js'
 const silent = { info() {}, warn() {}, error() {} }
 const scratch = path.join(os.tmpdir(), 'dsh-prompt-forge-repair-test-' + process.pid)
 
-const tags = createTagIndex({ dir: scratch, logger: silent })
+// lib/tags 的 createTagIndex JSDoc 还没列 dir/logger（task-19 的活），这里局部收口
+const tags = createTagIndex(/** @type {any} */ ({ dir: scratch, logger: silent }))
 // 等真实库加载完再测：未 ready 时只有种子数据，get() 会漏（top-down_bottom-up 就查不到）。
 await tags.ready()
 const repairer = createRepairer({ tags, logger: silent })

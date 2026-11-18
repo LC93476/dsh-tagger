@@ -29,6 +29,17 @@
 | POST | `/comfy/launch` | 拉起 ComfyUI（已在跑则直接认账），body `{ waitMs }` |
 | POST/GET | `/mcp` | MCP JSON-RPC 端点（GET 用于 SSE/探测） |
 
+**静态资源（不属于 `/tagger/api`，只有独立服务 `server/standalone.mjs` 提供）**：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/HEAD | `/`、`/panel`、`/panel.html` | 面板 HTML（骨架，引用下面的 CSS/JS） |
+| GET/HEAD | `/public/panel.css`、`/public/api.js`、`/public/state.js`、`/public/app.js` | 面板静态资源，`Cache-Control: no-store` |
+| GET/HEAD | `/about` | 信息页（健康状态 / 数据目录 / 接口清单） |
+
+`/public` 只收白名单扩展名（`.css .js .json .svg .png .jpg .jpeg .webp`），带 `..` 或解析后跑到
+`server/public/` 之外的路径一律 `400 {"ok":false,"error":"bad-path"}`（挡路径穿越）。
+
 ## `POST /forge`
 
 ```bash
@@ -104,7 +115,7 @@ curl -s http://127.0.0.1:PORT/tagger/api/refine \
   -d '{"positive":"1girl, on_bed","instruction":"加夜晚室内光和汗","mode":"add"}'
 ```
 
-返回形状见 `docs/CONTRACTS.md` 第 2 节。失败时 HTTP 502 + `{ ok:false, error }`。
+返回形状见 `docs/CONTRACT.md` 第 5 节。失败时 HTTP 502 + `{ ok:false, error }`。
 
 ## `POST /run`
 

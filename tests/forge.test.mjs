@@ -131,6 +131,7 @@ function hangingLlm(delayMs = 1200) {
   }
 }
 
+/** @param {{ config?: object, llm?: object, tags?: object, dir?: string }} [deps] 缺省项各自回落到默认 */
 function makeForge({ config, llm, tags, dir } = {}) {
   return createForge({
     config: config ?? makeConfig(),

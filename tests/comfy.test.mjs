@@ -151,8 +151,8 @@ async function startFakeComfy() {
       send(404, { error: 'not-found', path: url.pathname })
     })
   })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const { port } = server.address()
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = portOf(server)
   return {
     state,
     url: 'http://127.0.0.1:' + port,
@@ -160,11 +160,17 @@ async function startFakeComfy() {
   }
 }
 
+/** @param {import('node:net').Server} server @returns {number} */
+function portOf(server) {
+  const address = server.address()
+  return typeof address === 'object' && address !== null ? address.port : 0
+}
+
 /** 一个确定没人监听的端口：先开再关，端口就空出来了。 */
 async function deadBaseUrl() {
   const server = http.createServer(() => {})
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const { port } = server.address()
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = portOf(server)
   await new Promise(resolve => server.close(resolve))
   return 'http://127.0.0.1:' + port
 }

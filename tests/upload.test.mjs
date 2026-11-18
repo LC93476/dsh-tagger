@@ -34,11 +34,17 @@ function fakeCtx() {
   }
 }
 
+/** @param {import('node:net').Server} server @returns {number} */
+function portOf(server) {
+  const address = server.address()
+  return typeof address === 'object' && address !== null ? address.port : 0
+}
+
 async function withServer(rawConfig, run) {
   const rt = createRuntime(fakeCtx(), { ui: { keepHistory: 1 }, ...rawConfig })
   const server = http.createServer(createDispatch(createHandlers(rt), rt.log))
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const { port } = server.address()
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const port = portOf(server)
   try {
     await run({ base: 'http://127.0.0.1:' + port + PREFIX, rt })
   } finally {

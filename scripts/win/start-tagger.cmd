@@ -1,7 +1,8 @@
 @echo off
 rem plan: 双击启动 D:\DSh tagger 的独立服务（不经过 DSH），并自动打开浏览器面板
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+rem 脚本在 scripts\win\ 下，工作目录一律回到仓库根
+cd /d "%~dp0..\.."
 set "PORT=7789"
 set "URL=http://127.0.0.1:%PORT%/"
 title DSh Tagger @ %PORT%

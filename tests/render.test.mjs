@@ -8,7 +8,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -17,6 +17,18 @@ const root = path.resolve(here, '..')
 const clientPath = path.join(root, 'client.js')
 const zhPath = path.join(root, 'locale', 'zh.json')
 const enPath = path.join(root, 'locale', 'en.json')
+const clientDir = path.join(root, 'client')
+
+/* ── 子模块预载 ─────────────────────────────────────────────────────────────
+ * client.js 只是门面：面板实现拆成 client/ 下的 ESM 子模块，由宿主按
+ * {PREFIX}/_mod/<name>.js 提供。测试里用 file:// 基址喂 __DSH_TAGGER_MODBASE__，
+ * 再把 panel.js 提前 import 好塞进 __DSH_TAGGER_MODS__ —— 于是 loadClient() 仍
+ * 保持同步、__internals 立即可用、apply 走「模块已缓存」的同步注册分支，
+ * 与宿主二次挂载时的路径完全一致。
+ */
+const MODBASE = new URL('../client/', import.meta.url).href
+globalThis.__DSH_TAGGER_MODBASE__ = MODBASE
+globalThis.__DSH_TAGGER_MODS__ = await import(MODBASE + 'panel.js')
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -241,15 +253,17 @@ function createFetch(routes) {
 
 function loadClient(React) {
   const source = readFileSync(clientPath, 'utf8')
+  /** @type {any} */
   let captured = null
-  const scope = { __ModuleLoader__: { load: module => { captured = module } } }
+  const scope = { __ModuleLoader__: { load: (/** @type {any} */ module) => { captured = module } } }
   new Function('window', source)(scope)
   assert.ok(captured !== null, 'client.js 必须调用 window.__ModuleLoader__.load')
-  const module = captured.factory(name => {
+  const loaded = /** @type {any} */ (captured)
+  const module = loaded.factory((/** @type {string} */ name) => {
     if (name === 'react') return React
     throw new Error('client.js 只应该 require("react")，多了：' + name)
   })
-  return { module, internals: module.__internals, id: captured.id }
+  return { module, internals: module.__internals, id: loaded.id }
 }
 
 /* ── 夹具 ─────────────────────────────────────────────────────────────── */
@@ -358,7 +372,7 @@ function defaultRoutes(overrides = {}) {
 function withFetch(routes, run) {
   const { fetch, calls } = createFetch(routes)
   const previous = globalThis.fetch
-  globalThis.fetch = fetch
+  globalThis.fetch = /** @type {typeof globalThis.fetch} */ (/** @type {any} */ (fetch))
   return Promise.resolve()
     .then(() => run(calls))
     .finally(() => { globalThis.fetch = previous })
@@ -821,7 +835,7 @@ test('面板：ComfyUI 灯显示连接状态，点一下重新探活，启动按
     assert.ok(String(lamp.props.title).includes('D:/QUARK/ComfyUI-aki-v3.2/ComfyUI'), 'title 要说清是哪个目录：' + lamp.props.title)
 
     // ComfyUI 关了 → 点灯重新探活，灯变红并给出原因
-    status = { ok: false, reachable: false, message: '连接被拒绝，服务没在监听' }
+    status = /** @type {any} */ ({ ok: false, reachable: false, message: '连接被拒绝，服务没在监听' })
     const before = calls.filter(item => item.path === '/comfy').length
     lamp.props.onClick()
     await view.settle()
@@ -1105,4 +1119,72 @@ test('面板：SPI 徽标显示版本与槽位，前缀跟 API 常量一致；/s
     assert.deepEqual(rawKeys(view.tree), [])
     view.unmount()
   })
+})
+
+test('子模块取不到：面板降级成错误卡，apply 照常返回、slot 照常注册', async () => {
+  const React = createFakeReact()
+  const previousBase = globalThis.__DSH_TAGGER_MODBASE__
+  const previousMods = globalThis.__DSH_TAGGER_MODS__
+  // 基址指到不存在的目录：三个候选基址（注入基址 / 主前缀 / 旧前缀）全都取不到。
+  globalThis.__DSH_TAGGER_MODBASE__ = new URL('../client-missing/', import.meta.url).href
+  delete globalThis.__DSH_TAGGER_MODS__
+  try {
+    const { module } = loadClient(React)
+    assert.equal(module.__internals, undefined, '子模块没加载成功时不该有 __internals')
+
+    const registered = []
+    const ctx = {
+      slots: {
+        inject(name, factory) { factory() },
+        register(options, component) { registered.push({ options, component }); return () => {} },
+      },
+    }
+
+    const pending = module.apply(ctx)
+    assert.ok(pending !== null && typeof pending.then === 'function', '模块未缓存时 apply 要返回 promise')
+    await pending
+
+    assert.equal(registered.length, 2, '加载失败也要把两个 slot 注册上，否则宿主判 missing slot')
+    const list = registered.find(item => item.options.name === 'sidebar.panellist')
+    assert.equal(list.options.label(), '提示词', '错误态也要有面板名（走门面内置兜底文案）')
+    const main = registered.find(item => item.options.name === 'main')
+    assert.equal(main.options.inject().api, '/tagger/api')
+
+    const view = createView(React, main.component, {})
+    view.render()
+    const card = byTestId(view.tree, 'ptf-load-error')
+    assert.ok(card, '加载失败要渲染错误卡，不能白屏')
+    assert.ok(textOf(card).includes('子模块加载失败'))
+    const detail = byTestId(view.tree, 'ptf-load-error-message')
+    assert.ok(textOf(detail).length > '子模块加载失败：'.length, '要带上错误 message，实际=' + textOf(detail))
+    assert.ok(textOf(card).includes('重启宿主'), '要提示重启宿主')
+    assert.deepEqual(rawKeys(view.tree), [])
+
+    // 图标也得能画出来，不然侧边栏那一行会报渲染错误。
+    const icon = createView(React, registered[0].component, {})
+    icon.render()
+    assert.equal(icon.tree.type, 'svg')
+  } finally {
+    globalThis.__DSH_TAGGER_MODBASE__ = previousBase
+    globalThis.__DSH_TAGGER_MODS__ = previousMods
+  }
+})
+
+test('体积护栏：门面 < 12KB、client/ 每个子模块 < 30KB、文件名符合 _mod 路由白名单', () => {
+  const facade = readFileSync(clientPath)
+  assert.ok(facade.length < 12 * 1024, '门面要留在 12KB 内，实际 ' + facade.length + ' 字节')
+  // 门面按 classic script 执行（new Function），出现顶层 import/export 会直接抛语法错。
+  assert.equal(/^\s*(?:import|export)\s/m.test(facade.toString('utf8')), false, '门面不能有顶层 import/export')
+
+  const files = readdirSync(clientDir, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
+    .map(entry => entry.name)
+    .sort()
+  assert.ok(files.length >= 8, '子模块至少 8 个，实际 ' + files.length + '：' + files.join(', '))
+  for (const name of files) {
+    // 宿主只认 client/ 根下这一层，且 name 必须过 /^[a-z0-9][a-z0-9-]*\.js$/。
+    assert.match(name, /^[a-z0-9][a-z0-9-]*\.js$/, name + ' 不符合 _mod 路由白名单')
+    const size = readFileSync(path.join(clientDir, name)).length
+    assert.ok(size < 30 * 1024, name + ' 超 30KB：' + size + ' 字节')
+  }
 })

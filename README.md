@@ -40,22 +40,47 @@ HTTP 前缀 `/tagger/api`，旧前缀 `/prompt-forge/api` 同时兼容。
 ## 目录
 
 ```
-index.js            宿主入口（HTTP 前缀 + MCP 工具）
-client.js           侧边栏面板
-lib/tags.js         标签索引（别名 / 中英对照 / 权重格式化）
-lib/forge.js        锻造器
-lib/refine.js       二次精修
-lib/purge.js        破甲系统提示词
-lib/comfy.js        ComfyUI 投递
-lib/mcp.js          MCP 服务端
-lib/spi.js          扩展注册表
-lib/routes.js       路由与 dispatch
-server/standalone.mjs  脱离 DSH 的独立服务
-docs/CONTRACTS.md   扩展契约（SPI / refine / 前端）
-docs/API.md         接口手册
+index.js                宿主入口（HTTP 前缀 + MCP 工具）
+client.js               侧边栏面板门面（实现拆在 client/）
+client/                 面板子模块（locale / api / state / ui / views）
+lib/tags.js             标签索引统一入口（实现拆在 lib/tags/）
+lib/tags/text.js        归一化/键名/转义/权重写法（纯函数）
+lib/tags/loader.js      读盘、overlay 签名、建索引
+lib/tags/matcher.js     检索、canonicalize、中文对照、近邻建议
+lib/tags/index.js       懒加载、热重载、进程内单例（resetTagIndexCache）
+lib/forge.js            锻造器
+lib/repair.js           词形修复（差一点就对 → 库里真词）
+lib/postprocess.js      去重、降权、13 段排序、裁剪门面（规则表在 lib/postprocess/rules.js）
+lib/zh-intent.js        中文姿势/视角意图与候选注入
+lib/refine.js           二次精修门面（实现拆在 lib/refine/）
+lib/purge.js            破甲系统提示词
+lib/comfy.js            ComfyUI 投递
+lib/backend-common.js   后端公共层（HTTP / 超时 / 错误归一 / 轮询）
+lib/mcp.js              MCP 服务端
+lib/spi.js              扩展注册表
+lib/routes.js           路由与 dispatch
+lib/config.js           默认配置与归一化
+server/standalone.mjs   脱离 DSH 的独立服务
+server/public/          Web 面板静态资源（panel.css / api.js / state.js / app.js）
+scripts/win/            Windows 启停脚本（根目录 .cmd/.vbs 只是转发）
+tools/                  开发期工具（见下）
+tests/                  16 个测试套件
+docs/CONTRACT.md        核心契约（模块 / 配置 / 路由 / SPI / 客户端）
+docs/API.md             接口手册（HTTP 路由 + MCP 工具）
+docs/PERF.md            实测性能数字与健壮性清单（scripts/bench.mjs）
 ```
 
-## 测试
+`tools/` 里都是**开发期**用的，运行时不需要：
+
+| 脚本 | 用途 | 运行时要不要 |
+| --- | --- | --- |
+| `tools/make-pose-thumbs.py` | 把姿势库 1439 张 500KB 原图压成 220px 缩略图（走 PIL，需要 Python） | **不要**，缩略图已随 ComfyUI 节点目录生成；换机器/换姿势库时才重跑 |
+| `tools/ui2api.mjs` | 把 ComfyUI 的 UI 格式工作流转成 API 格式模板 | 不要 |
+| `tools/make-public.mjs` | 生成公开发布版（见文末） | 不要 |
+| `scripts/build-tags.mjs` | 校验/统计词表覆盖情况 | 不要 |
+```
+
+## 测试与静态检查
 
 本机 bash 没有 node，用 Electron 当 node：
 
@@ -66,6 +91,24 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/D
 ```
 
 （`--test` 必须逐文件列；给目录会 MODULE_NOT_FOUND。）
+
+16 个套件：`comfy` `forge` `http` `mcp` `poses` `postprocess` `refine` `render` `repair` `shim`
+`standalone` `tags` `tags-pose` `ui2api` `upload` `zh-intent`。
+
+词表结构自检（`data/tags/*.jsonl` 每行合法性 + 同文件内 tag 重复检查，CI 第一道门禁）：
+
+```bash
+node scripts/check-tags.mjs          # 有问题 exit 1，并列出「文件:行号 原因」
+```
+
+类型检查（不进构建，纯检查；`tsconfig.json` 是 `allowJs` + `checkJs` + `noEmit`）：
+
+```bash
+npm i --no-save typescript @types/node   # 只在本地查，不写进依赖
+npx tsc --noEmit -p tsconfig.json
+```
+
+CI 跑同样的两件事，见 `.github/workflows/ci.yml`。
 
 ## 装了哪两个 profile
 
@@ -80,7 +123,8 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/D
 
 ## 双击启动（不经过 DSH）
 
-`D:\DSh tagger` 根目录下三个脚本，双击就行：
+根目录下三个脚本，双击就行（真正的实现归档在 `scripts/win/`，根目录这三个只是转发入口，
+为的是保持"双击根目录某个文件"的老习惯；要改逻辑改 `scripts/win/` 里那份）：
 
 | 脚本 | 作用 |
 | --- | --- |
@@ -88,12 +132,14 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/D
 | `start-tagger-hidden.vbs` | 同上但不出黑窗（想彻底静默用这个），面板照样自动打开。 |
 | `stop-tagger.cmd [端口]` | 按端口结束服务（默认 7789，端口被占又不记得窗口在哪时用）。 |
 
+`scripts/win/` 里另有 `tagger.env.cmd.example` —— 复制到**仓库根目录**改名 `tagger.env.cmd` 才会被读到。
+
 脚本自己找运行时：先 `where node`，找不到就用 DeepSeek Harness 自带的 Electron（`ELECTRON_RUN_AS_NODE=1`）
 当 node 跑，所以本机没装 node 也能启动。端口已经在监听时不重复起，直接开面板。
 
 ### 想用锻造 / 精修的话再配一次模型接口
 
-独立服务拿不到 DSH 宿主的 `llm` 服务，得直接给一个 OpenAI 兼容接口。把 `tagger.env.cmd.example`
+独立服务拿不到 DSH 宿主的 `llm` 服务，得直接给一个 OpenAI 兼容接口。把 `scripts/win/tagger.env.cmd.example`
 复制成 `tagger.env.cmd`（脚本会自动 `call` 它），填其中一段：
 
 ```bat

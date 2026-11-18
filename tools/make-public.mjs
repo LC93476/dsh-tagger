@@ -338,7 +338,8 @@ for (const rel of gitFiles()) {
   let text = OVERRIDE.has(rel) ? readText(OVERRIDE.get(rel)) : readText(rel)
   text = scrub(rel, ext, text)
   if (FORBIDDEN.test(text)) {
-    const bad = text.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => FORBIDDEN.test(l))
+    /** @type {Array<[number, string]>} */
+    const bad = text.split('\n').map((l, i) => /** @type {[number, string]} */ ([i + 1, l])).filter(([, l]) => FORBIDDEN.test(l))
     for (const [no, l] of bad.slice(0, 4)) report.violations.push(rel + ':' + no + ' ' + l.trim().slice(0, 90))
     if (bad.length > 4) report.violations.push(rel + '：另有 ' + (bad.length - 4) + ' 行未清干净')
   }

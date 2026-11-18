@@ -93,12 +93,39 @@ function waitExit(child, timeoutMs = 15000) {
   })
 }
 
+/** @param {import('node:net').Server} server @returns {number} */
+function portOf(server) {
+  const address = server.address()
+  return typeof address === 'object' && address !== null ? address.port : 0
+}
+
 function spawnStandalone(args, env) {
   return spawn(process.execPath, [entry, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
+/**
+ * 发原始路径请求。
+ * fetch / undici 会按 URL 规范把 '/public/../index.js' 折叠成 '/index.js'，路径穿越根本测不出来；
+ * 只有裸 http.request 才能把 '..' 原样送到服务器。
+ */
+function rawRequest(port, rawPath) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: Number(port), path: rawPath, method: 'GET' }, res => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', chunk => {
+        body += chunk
+      })
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
 test('standalone：health / spi / spi.version / 根路径 HTML 都能对外提供', { timeout: 60000 }, async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'dsh-tagger-standalone-'))
+  /** @type {Record<string, string | undefined>} */
   const env = { ...process.env, DSH_TAGGER_DATA: dataDir, ELECTRON_RUN_AS_NODE: '1' }
   // 明确「没配模型接口」：health 必须如实说 llmReady:false，且不许联网
   delete env.DSH_TAGGER_API_KEY
@@ -128,15 +155,56 @@ test('standalone：health / spi / spi.version / 根路径 HTML 都能对外提�
     assert.equal(typeof spi.spi.version, 'number')
     assert.ok(Array.isArray(spi.spi.slots.tagProviders))
 
-    // 根路径 = 能直接用的锻造台面板（不是信息页）
+    // 根路径 = 能直接用的锻造台面板；样式与脚本已拆到 /public，骨架只留引用
     const rootRes = await fetch(url + '/')
     assert.equal(rootRes.status, 200)
     assert.match(rootRes.headers.get('content-type') ?? '', /text\/html/)
     const panel = await rootRes.text()
     assert.ok(panel.includes('DSh Tagger'), '面板标题里要有产品名')
     assert.ok(panel.includes('锻造台'), '根路径要直接是面板，不是信息页')
-    assert.ok(panel.includes('"/tagger/api"'), '面板要打到自己这个前缀上')
     assert.ok(panel.includes('二次精修'), '面板要有二次精修区块')
+    assert.ok(panel.includes('/public/panel.css'), '骨架要引用拆出去的样式表')
+    assert.ok(panel.includes('/public/app.js'), '骨架要引用拆出去的脚本')
+    assert.ok(Buffer.byteLength(panel) < 10240, 'panel.html 只留骨架，必须小于 10KB')
+
+    // 拆出去的静态资源：200 + 正确 MIME + no-store + 原来的内容真的搬过去了
+    const cssRes = await fetch(url + '/public/panel.css')
+    assert.equal(cssRes.status, 200)
+    assert.match(cssRes.headers.get('content-type') ?? '', /text\/css/)
+    assert.equal(cssRes.headers.get('cache-control'), 'no-store')
+    assert.ok((await cssRes.text()).includes('--brand'), '样式表要有主题变量')
+
+    const appRes = await fetch(url + '/public/app.js')
+    assert.equal(appRes.status, 200)
+    assert.match(appRes.headers.get('content-type') ?? '', /javascript/)
+    const appJs = await appRes.text()
+    assert.ok(appJs.includes('doRefine'), '精修逻辑要在 app.js 里')
+    assert.ok(appJs.includes('renderResult'), '渲染逻辑要在 app.js 里')
+
+    const apiJs = await (await fetch(url + '/public/api.js')).text()
+    assert.ok(apiJs.includes('"/tagger/api"'), '面板要打到自己这个前缀上')
+    assert.ok((await (await fetch(url + '/public/state.js')).text()).includes('positiveText'), 'state.js 要带表单读写')
+
+    // 路径穿越：/public 下只放行普通文件，任何 '..' 都必须被挡（400 / 404 都算挡住）
+    const port = new URL(url).port
+    for (const evil of [
+      '/public/../index.js',
+      '/public/../lib/config.js',
+      '/public/%2e%2e/index.js',
+      '/public/sub/../../index.js',
+      '/public/..%5cindex.js',
+    ]) {
+      const raw = await rawRequest(port, evil)
+      assert.ok(raw.status === 400 || raw.status === 404, evil + ' 必须被挡下，实际 ' + raw.status)
+      assert.equal(JSON.parse(raw.body).ok, false, evil + ' 要回结构化 JSON')
+      assert.equal(raw.body.includes('createRuntime'), false, evil + ' 不能漏出源码')
+    }
+    // 不存在的资源、不在白名单里的扩展名，同样是结构化 404
+    for (const miss of ['/public/nope.css', '/public/panel.html', '/public/shims.mjs']) {
+      const res = await fetch(url + miss)
+      assert.equal(res.status, 404, miss + ' 应该 404')
+      assert.equal((await res.json()).ok, false)
+    }
 
     const panelAlias = await fetch(url + '/panel')
     assert.equal(panelAlias.status, 200)
@@ -183,6 +251,7 @@ test('standalone：--help 打印用法后退出 0，不占端口', { timeout: 30
 
 test('standalone：面板能填接口与 ComfyUI，保存后立刻生效（不用重启）', { timeout: 60000 }, async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'dsh-tagger-standalone-'))
+  /** @type {Record<string, string | undefined>} */
   const env = { ...process.env, DSH_TAGGER_DATA: dataDir, ELECTRON_RUN_AS_NODE: '1' }
   delete env.DSH_TAGGER_API_KEY
   delete env.DSH_TAGGER_BASE_URL
@@ -198,8 +267,8 @@ test('standalone：面板能填接口与 ComfyUI，保存后立刻生效（不�
     res.writeHead(404, { 'Content-Type': 'application/json' })
     res.end('{}')
   })
-  await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve))
-  const stubUrl = 'http://127.0.0.1:' + stub.address().port
+  await new Promise(resolve => stub.listen(0, '127.0.0.1', () => resolve()))
+  const stubUrl = 'http://127.0.0.1:' + portOf(stub)
 
   const child = spawnStandalone(['--port', '0', '--data-dir', dataDir], env)
   try {

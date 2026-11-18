@@ -3,14 +3,20 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { createLlmShim } from '../server/shims.mjs'
 
+/** @param {import('node:net').Server} server @returns {number} */
+function portOf(server) {
+  const address = server.address()
+  return typeof address === 'object' && address !== null ? address.port : 0
+}
+
 async function withStub(handler, run) {
   const seen = []
   const server = http.createServer((req, res) => {
     seen.push({ url: req.url, headers: req.headers })
     handler(req, res, seen)
   })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const base = 'http://127.0.0.1:' + server.address().port
+  await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve()))
+  const base = 'http://127.0.0.1:' + portOf(server)
   try {
     return await run(base, seen)
   } finally {
