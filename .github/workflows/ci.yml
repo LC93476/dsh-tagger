@@ -50,6 +50,6 @@ jobs:
           npm test 2>&1 | tee test-out.txt
           code=${PIPESTATUS[0]}
           echo "test-exit=$code"
-          grep -n -A 14 "failing tests" test-out.txt | head -80
+          grep -n -A 22 "^not ok" test-out.txt | head -90
           tail -12 test-out.txt
           exit $code
