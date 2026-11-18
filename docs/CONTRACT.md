@@ -313,6 +313,8 @@ npx tsc --noEmit -p tsconfig.json
 
 三道门禁与 `.github/workflows/ci.yml` 一一对应（CI 是 windows-latest，与开发机一致）。
 
+该 workflow 文件目前因 token 缺 `workflow` scope 没有随仓提交（见 `.gitignore` 里的说明）；补上 scope 后删掉那两行再提交即可，门禁命令本身不用改。
+
 **测试必须串行跑**（`--test-concurrency=1`）：deliverable 里有几个套件会读同一份默认词表目录，进程并行时可能撞上另一个进程正在重写 overlay，表现为偶发 1 条失败（单跑必绿）。这不是业务 bug，但不许在门禁里并行。
 
 `tsconfig.json` 是 `allowJs` + `checkJs` + `noEmit`：改的是 JS，检查的是错误用法（拼错的字段、传错参数）。

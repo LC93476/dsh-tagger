@@ -109,7 +109,12 @@ npm i --no-save typescript @types/node   # 只在本地查，不写进依赖
 npx tsc --noEmit -p tsconfig.json
 ```
 
-CI 跑同样的三道门禁（词表自检 → 类型检查 → 全量测试），见 `.github/workflows/ci.yml`；本地等价命令就是上面这三条。
+CI 跑同样的三道门禁（词表自检 → 类型检查 → 全量测试），配置在 `.github/workflows/ci.yml`。
+
+> 注意：这个 workflow 文件**暂时没有随仓提交**。当前推送用的 GitHub token 只有 `repo` scope，
+> GitHub 会拒绝任何创建/修改 `.github/workflows/*.yml` 的推送（`refusing to allow a Personal Access Token to
+> create or update workflow … without workflow scope`）。给 token 加上 `workflow` scope 后，删掉 `.gitignore`
+> 里那两行、`git add .github/workflows/ci.yml && git commit && git push` 就补齐了。本地等价命令就是上面这三条。
 
 ## 装了哪两个 profile
 
