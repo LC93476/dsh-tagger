@@ -82,6 +82,7 @@ tests/                  17 个测试套件
 docs/CONTRACT.md        核心契约（模块 / 配置 / 路由 / SPI / 客户端）
 docs/API.md             接口手册（HTTP 路由 + MCP 工具）
 docs/PERF.md            实测性能数字与健壮性清单（scripts/bench.mjs）
+docs/AGENT-INJECT.md    交给 agent 执行的注入指令（可直接粘贴的提示词 + 退出码语义）
 ```
 
 `tools/` 里都是**开发期**用的，运行时不需要：
