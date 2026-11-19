@@ -306,6 +306,7 @@ DSH 面板不需要填这些 —— 那边走宿主自己的模型服务。
 6. 最后复查红线，输出目录里还有命中就 exit 1
 
 改完 lib/* 或词表后重跑一次，再推 lite 仓库即可。公开版仓库：dsh-tagger-lite（公开）。
+
 ### 反过来：把自己的提示词一键注入公开版
 
 公开版是「合规版」，破甲提示词里那几段露骨词清单被 `BLOCK_RULES` 拆掉了。想在自己机器上把公开版变成
@@ -334,3 +335,27 @@ DSH 面板不需要填这些 —— 那边走宿主自己的模型服务。
 `--check` 幂等，重复跑不会重复备份。
 
 ⚠️ 注入后的目录**不要 `git push` 到公开仓**。想回到干净公开版：`--restore`，或重跑 `tools/make-public.mjs`。
+
+### 把注入能力打包带走（注入包）
+
+换台机器、或者只想把「注入」这一步交给别人时，光拷一个 `inject-private.mjs` 没用 —— 六份私货文件得跟着走。
+打成独立的注入包：
+
+    node scripts/pack-inject.mjs                 # 出 dist/dsh-tagger-inject-<版本>/ 与同名 zip
+    node scripts/pack-inject.mjs --out /tmp/x    # 换输出目录
+    node scripts/pack-inject.mjs --no-zip        # 只要目录
+
+包里的结构（约 96 KB，不需要 node_modules、不联网）：
+
+    dsh-tagger-inject-0.2.0/
+      inject-private.mjs        注入脚本（认 payload/ 布局，也仍然认仓库布局）
+      payload/<六个相对路径>     六份私货文件，路径与仓库里一致
+      inject.cmd                Windows 入口：inject.cmd "D:\DSh tagger-lite" [--dry|--check|--verify|--restore]
+      inject.sh                 macOS / Linux 入口：./inject.sh "/path/to/dsh-tagger-lite"
+      README.txt                用法与还原说明
+      MANIFEST.txt              每份文件 sha256 前 16 位 + 字节数
+
+`inject.cmd` 找 node 的顺序：`PATH` 里的 node → DeepSeek Harness 自带的 electron（拿 `ELECTRON_RUN_AS_NODE=1` 当 node 用）→ `%USERPROFILE%\AppData\Local\Programs\DeepSeek Harness\...` → `%ProgramFiles%\nodejs\node.exe`。都没有才报错。
+
+包内注入的备份写在**包目录**的 `.inject-backups/<时间戳>/`（不写进目标仓），`--restore` 用同一份备份精确回滚。
+

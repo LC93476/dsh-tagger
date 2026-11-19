@@ -53,6 +53,9 @@ const SKIP = new Set([
   'tests/_hint-probe.mjs',
   // 反向脚本（把私有提示词注入回公开版）当然也不进公开版。
   'tools/inject-private.mjs',
+  // 注入包打包器与它的用例：都引用了上面那份反向脚本，公开版里没有。
+  'scripts/pack-inject.mjs',
+  'tests/pack-inject.test.mjs',
   // 生成脚本自己不进公开版：它的表里逐字写着红线词，整行丢掉后只剩一个残缺的分词器，
   // 而公开仓库本来就不需要重新生成一次公开版。
   'tools/make-public.mjs',

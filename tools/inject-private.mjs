@@ -30,6 +30,10 @@ import { spawnSync } from 'node:child_process'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
+const SELF = process.argv[1] ? path.resolve(process.argv[1]) : ''
+// 两种布局：仓库里（tools/inject-private.mjs，源在上一级）；打包后（<包>/inject-private.mjs，源在 <包>/payload/）
+const PKG_LAYOUT = existsSync(path.join(HERE, 'payload'))
+const SRC_ROOT = PKG_LAYOUT ? path.join(HERE, 'payload') : ROOT
 const argv = process.argv.slice(2)
 
 /** 取 `--name value` 的值。 @param {string} name @returns {string | undefined} */
@@ -38,18 +42,18 @@ function argOf(name) {
   return i >= 0 ? argv[i + 1] : undefined
 }
 
-const DST = path.resolve(argOf('--dst') ?? path.join(path.dirname(ROOT), 'DSh tagger-lite'))
+const DST = path.resolve(argOf('--dst') ?? path.join(path.dirname(SRC_ROOT), 'DSh tagger-lite'))
 const DRY = argv.includes('--dry')
 const CHECK = argv.includes('--check')
 const VERIFY = argv.includes('--verify')
 const QUIET = argv.includes('--quiet')
-const BACKUP_ROOT = path.resolve(argOf('--backup-dir') ?? path.join(ROOT, '.inject-backups'))
+const BACKUP_ROOT = path.resolve(argOf('--backup-dir') ?? path.join(PKG_LAYOUT ? HERE : SRC_ROOT, '.inject-backups'))
 
 /**
  * 要注入的文件清单。key 用于 --only 过滤。
  * @type {Array<{ key: string, rel: string, label: string }>}
  */
-const FILES = [
+export const INJECT_FILES = [
   { key: 'prompt', rel: 'lib/purge.js', label: '破甲提示词（提示词模块全文）' },
   { key: 'rules', rel: 'lib/postprocess/rules.js', label: '分桶与上下位表（成人向细节）' },
   { key: 'intent', rel: 'lib/zh-intent.js', label: '中文意图词表（体位/行为条目）' },
@@ -78,9 +82,9 @@ function stamp(d = new Date()) {
 function plan() {
   const only = argOf('--only')
   const wanted = only ? new Set(only.split(',').map(s => s.trim()).filter(Boolean)) : null
-  const items = FILES.filter(f => !wanted || wanted.has(f.key) || wanted.has(f.rel))
+  const items = INJECT_FILES.filter(f => !wanted || wanted.has(f.key) || wanted.has(f.rel))
   return items.map(f => {
-    const srcPath = path.join(ROOT, f.rel)
+    const srcPath = path.join(SRC_ROOT, f.rel)
     const dstPath = path.join(DST, f.rel)
     const src = readOrNull(srcPath)
     const dst = readOrNull(dstPath)
@@ -153,6 +157,7 @@ function verify() {
   return r.status === 0
 }
 
+function main() {
 const restoreArg = argv.indexOf('--restore')
 if (restoreArg >= 0) {
   const named = argOf('--restore')
@@ -165,7 +170,7 @@ if (restoreArg >= 0) {
     const items = plan()
     const pending = items.filter(it => it.state === 'new' || it.state === 'update')
     if (!QUIET) {
-      console.log('源：' + ROOT)
+      console.log('源：' + SRC_ROOT)
       console.log('目标：' + DST)
       console.log('')
       console.log('文件                                        状态      字节')
@@ -191,8 +196,12 @@ if (restoreArg >= 0) {
         writeFileSync(it.dstPath, it.src)
       }
       console.log('✓ 注入完成：' + pending.length + ' 份文件' + (dir ? '（原文件已备份到 ' + dir + '）' : ''))
-      console.log('  公开版现在是私货全量版 —— 不要 git push 到公开仓；要还原：node tools/inject-private.mjs --restore')
+      const hint = PKG_LAYOUT ? 'inject.cmd "' + DST + '" --restore' : 'node tools/inject-private.mjs --restore'
+      console.log('  公开版现在是私货全量版 —— 不要 git push 到公开仓；要还原：' + hint)
       if (VERIFY && !verify()) { console.error('× 目标仓词表自检失败'); process.exitCode = 1 }
     }
   }
 }
+}
+
+if (SELF === path.resolve(fileURLToPath(import.meta.url))) main()
