@@ -306,3 +306,31 @@ DSH 面板不需要填这些 —— 那边走宿主自己的模型服务。
 6. 最后复查红线，输出目录里还有命中就 exit 1
 
 改完 lib/* 或词表后重跑一次，再推 lite 仓库即可。公开版仓库：dsh-tagger-lite（公开）。
+### 反过来：把自己的提示词一键注入公开版
+
+公开版是「合规版」，破甲提示词里那几段露骨词清单被 `BLOCK_RULES` 拆掉了。想在自己机器上把公开版变成
+**私货全量版**（同一套提示词、同一套词表），用反向脚本，不用手抄：
+
+    node tools/inject-private.mjs               # 注入（默认目标 ../DSh tagger-lite）
+    node tools/inject-private.mjs --dry         # 只列表，看差在哪
+    node tools/inject-private.mjs --check       # 已最新 → 0；有差异 → 1（可以塞进脚本/CI）
+    node tools/inject-private.mjs --dst "D:/别的目录"
+    node tools/inject-private.mjs --only prompt,tags
+    node tools/inject-private.mjs --verify      # 注完顺手跑目标仓的词表自检
+    node tools/inject-private.mjs --restore     # 用最近一次备份还原
+
+注入的 6 份文件（其余一律不动，README 仍是公开版）：
+
+| 文件 | 公开版里被削成什么样 | 注入后 |
+| --- | --- | --- |
+| `lib/purge.js` | 露骨词清单整段换成含蓄说法 | 原样，破甲提示词全量 |
+| `lib/postprocess/rules.js` | 成人向细节整表删掉 | 分桶 / 上下位关系全量 |
+| `lib/zh-intent.js` | 9 条体位·行为意图词被丢 | 全量 27 行意图条目 |
+| `data/tags/general-nsfw.jsonl` | **整份不存在** | 46 行 NSFW 补词 |
+| `data/tags/pose-view.jsonl` | 丢 15 行 | 136 行全量 |
+| `data/tags/seed/seed-08-adult.jsonl` | 丢 12 行 | 全量 |
+
+写盘前会把目标文件备份到本仓库的 `.inject-backups/<时间戳>/`（已 gitignore），`--restore` 直接回滚；
+`--check` 幂等，重复跑不会重复备份。
+
+⚠️ 注入后的目录**不要 `git push` 到公开仓**。想回到干净公开版：`--restore`，或重跑 `tools/make-public.mjs`。
