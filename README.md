@@ -93,6 +93,8 @@ docs/AGENT-INJECT.md    交给 agent 执行的注入指令（可直接粘贴的�
 | `tools/ui2api.mjs` | 把 ComfyUI 的 UI 格式工作流转成 API 格式模板 | 不要 |
 | `tools/make-public.mjs` | 生成公开发布版（见文末） | 不要 |
 | `scripts/build-tags.mjs` | 校验/统计词表覆盖情况 | 不要 |
+| `scripts/check-overlay-tags.mjs` | 补词表质量闸门：tag 是否真在词库、中文是否为空、跨文件是否重复、`aliases` 是否规范、`POSE_HINTS` 里的 tag 是否都在库 | 不要（改 `data/tags/**` 后跑一次） |
+| `scripts/suggest-overlay.mjs` | 按热度从真词表里掏「库里真有但 overlay 没收录」的候选词（带 danbooru 分组与中文名），补词取材用 | 不要 |
 ```
 
 ## 检查与测试（npm 脚本）
@@ -124,6 +126,7 @@ export ELECTRON_RUN_AS_NODE=1
 R="C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe"
 "$R" scripts/run-tests.mjs          # = npm test
 "$R" scripts/check-tags.mjs         # = npm run check:tags
+"$R" scripts/check-overlay-tags.mjs # 补词表体检（改了 data/tags/** 就跑）
 ```
 
 CI 跑同样的三道门禁（`check:tags` → `typecheck` → `test`），配置在 `.github/workflows/ci.yml`，
