@@ -163,6 +163,19 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/34701/AppData/Local/Programs/DeepSeek Harness/D
 各自 try 注册一次，失败只记日志（不会因为两条都注册而崩）。
 
 
+## 一键部署（换台机器 / 换系统都能起）
+
+这个项目零运行时依赖（只用 node 标准库，不需要 `npm install`），词表也一起在 `data/` 里，
+所以换环境只要满足「有 node 或有 docker」。四种起法，挑一条：
+
+| 场景 | 一条命令 |
+| --- | --- |
+| Windows | 双击 `deploy.cmd`（换端口：`deploy.cmd 8090`）；没 node 也没 docker 会自动下便携版 node 到 `.runtime/` |
+| macOS / Linux | `./deploy.sh`（换端口：`./deploy.sh 8090`；对外监听：`./deploy.sh 8090 0.0.0.0`） |
+| 服务器 / NAS（Docker） | `cp .env.example .env` 填好 → `docker compose up -d --build` |
+| 断网 / 拷 U 盘 | `node scripts/pack.mjs` 打出 `dist/dsh-tagger-0.2.0.zip`（约 19MB，含全量词表快照），拷过去解开跑 `deploy.sh` / 双击 `deploy.cmd` |
+
+细节（镜像怎么建、容器里连宿主 ComfyUI、健康检查、常见报错）全在 [INSTALL.md](INSTALL.md)。
 ## 双击启动（不经过 DSH）
 
 根目录下三个脚本，双击就行（真正的实现归档在 `scripts/win/`，根目录这三个只是转发入口，
@@ -247,6 +260,12 @@ node server/standalone.mjs --port 7789 --base-url https://api.example.com/v1 --a
 | --- | --- | --- |
 | 模型 API | 接口地址（OpenAI 兼容，可带 `/v1`）、API Key、模型名、provider 名 | 保存接口 · 测试连接 |
 | ComfyUI | 地址、安装目录、python 路径、工作流模板目录、默认工作流 id | 保存 ComfyUI · 检测连通 · 启动 ComfyUI |
+| 导入自定义工作流 | 选一份 ComfyUI「导出（API 格式）」的 `.json`，可再带一份 `.schema.json`；填模板 id | 导入到模板目录（同名可勾「覆盖同名」） |
+
+**导入自己的工作流**：在 ComfyUI 里把工作流用「工作流 → 导出（API）/ Save (API Format)」存成 json（那份是 `{ 节点id: { class_type, inputs } }`，
+不是带 `nodes`/`links` 的界面格式），回到面板「接口设置 → 导入自定义工作流」选文件、填个 id（小写字母/数字/连字符）、点「导入到模板目录」。
+没带 schema 也没关系：服务端会按节点输入反推一份（正负向提示词绑到识别出的 CLIPTextEncode，seed/steps/cfg/宽高拿模板当前值当默认），
+导入完下拉里立刻可选、直接出图。同名模板默认拒绝，要覆盖得勾「覆盖同名」。接口细节见 docs/API.md「导入自定义工作流」。
 
 保存写进 `settings.json`，**下一次锻造就用新值，不用重启**；Key 存进后 `GET /config` 只回「已配置 + 尾号」，不回明文。
 （Key 本身是明文落在 `~/.dsh-tagger/settings.json` 里，跟其他本地配置同权限 —— 接口不吐它，但能读这个文件的人能看到。）
