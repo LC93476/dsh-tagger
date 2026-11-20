@@ -53,14 +53,22 @@ const DICT_SOURCE = DICT_DIR === undefined
   ? {}
   : { dataDirs: [DICT_DIR], probeDefaults: false }
 
-/** 收集要体检的文件：data/tags/*.jsonl + data/tags/seed/*.jsonl */
+/**
+ * 收集要体检的文件：data/tags/*.jsonl + data/tags/seed/*.jsonl。
+ * 名字以 .example.jsonl 结尾的是模板（公开仓的 adult-overlay.example.jsonl 就是这种），
+ * 索引不加载它（lib/tags/loader.js 的 isOverlayJsonl），体检也不该拿它当生产词表算重复与存在性。
+ */
+function isCheckable(name) {
+  const lower = name.toLowerCase()
+  return lower.endsWith('.jsonl') && !lower.endsWith('.example.jsonl')
+}
 function overlayFiles() {
   const out = []
   const top = existsSync(DIR) ? readdirSync(DIR) : []
-  for (const name of top.sort()) if (name.endsWith(".jsonl")) out.push(path.join(DIR, name))
+  for (const name of top.sort()) if (isCheckable(name)) out.push(path.join(DIR, name))
   const seedDir = path.join(DIR, "seed")
   const seed = existsSync(seedDir) ? readdirSync(seedDir).sort() : []
-  for (const name of seed) if (name.endsWith(".jsonl")) out.push(path.join(seedDir, name))
+  for (const name of seed) if (isCheckable(name)) out.push(path.join(seedDir, name))
   return out
 }
 
