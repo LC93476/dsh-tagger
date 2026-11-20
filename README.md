@@ -76,6 +76,19 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/<你>/AppData/Local/Programs/DeepSeek Harness/D
 - **姿势参考**：内置 1439 张姿势 / 视角线稿，点一张就插进提示词，省得手写构图词。
 - **设置**：模型接口与 ComfyUI 地址在面板里就能填，写回数据目录的 `settings.json`，不用手改文件。
 
+## 姿势画廊
+
+挑姿势、拿 tag —— 不跑 ControlNet。内置姿势库有 1439 张姿势 / 视角线稿，画廊把同一姿势的
+正面 / 斜侧 / 侧面 / 俯视 / 仰视聚成一组，点开一张就能看到该补哪些 tag（姿态词 + 镜头词），
+可以单条划掉不要的，也可以整串复制或一键填回锻造台。
+
+- **入口**：浏览器打开 `/gallery`（`http://127.0.0.1:7789/gallery`），或点面板「出图」卡右上角的「姿势画廊 ↗」（新标签页打开）。
+- **数据源**：ComfyUI 里装的 `ai-pose-gallery-zh` 自制节点 —— 读它的 `custom_nodes/ai-pose-gallery-zh/skills/pose-reference-*/references/catalog.csv`，缩略图取 `img/thumbs/`。所以得先把 ComfyUI 目录（`comfy.launchDir`，设置页或 `settings.json`）配对，否则画廊是空的，页面会提示「没读到姿势库」。
+
+  「填入面板」走浏览器本地存储：把当前这几个 tag 写进 `localStorage` 的 `dsh-tagger:pending-prompt`，然后跳回 `/`；锻造台启动时读一次就删除，填进输入框并聚焦 —— 所以它只会覆盖这一次，不会在下次开面板时把你手写的内容盖掉。
+
+  画廊只回答「这个姿势该带哪些词」，不做骨架控制。真要锁姿势还是走 ControlNet 那套模板（见 `docs/API.md` 里姿势类模板的两个专属变量）。
+
 ## 三道本地后处理
 
 LLM 只负责「把话听懂」，剩下的规范化全在本地做，所以结果可复现、可体检：
