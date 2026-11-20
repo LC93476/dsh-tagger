@@ -36,6 +36,7 @@
     "check:overlay": "node scripts/tags/check-overlay-tags.mjs",
     "check:layout": "node scripts/dev/check-layout.mjs",
     "tags:import": "node scripts/tags/import-dict.mjs",
+    "tags:sfw": "node scripts/tags/filter-dict.mjs",
     "bench": "node scripts/dev/bench.mjs",
     "check": "npm run check:tags && npm run check:overlay && npm run check:layout && npm run typecheck && npm test",
     "pack": "node scripts/release/pack.mjs",

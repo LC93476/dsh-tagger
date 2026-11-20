@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { filterDict } from '../tags/filter-dict.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -57,6 +58,10 @@ const SKIP = new Set([
   // 生成脚本自己不进公开版：它的表里逐字写着红线词，整行丢掉后只剩一个残缺的分词器，
   // 而公开仓库本来就不需要重新生成一次公开版。
   'scripts/release/make-public.mjs',
+  // SFW 词表过滤器同理：它的屏蔽词表本身逐字写着那些词，整行丢掉就废了；
+  // 公开仓只需要过滤后的结果（data/danbooru + 带 sfw 标记的 manifest），不需要这个工具。
+  'scripts/tags/filter-dict.mjs',
+  'tests/filter-dict.test.mjs',
 ])
 
 const OVERRIDE = new Map([['README.md', 'public-src/README.public.md']])
@@ -448,6 +453,41 @@ for (const [rel, content] of EXTRA) {
     writeFileSync(target, content, 'utf8')
   }
   report.files++
+}
+
+// 全量词表快照：私有仓那份是完整快照（99447 行，逐行都可能带露骨 tag），公开仓不带原件，
+// 带的是同一份数据经 scripts/tags/filter-dict.mjs 过滤后的 SFW 版本（露骨分组 / tag token /
+// 中文别名 / 备注命中即丢，保留 28700+ 条常规词）。过滤结果还要再过一遍红线正则：
+// 滤不干净就让生成失败，而不是把脏数据写进公开仓。
+const DICT_SRC = path.join(ROOT, 'data', 'danbooru')
+if (existsSync(path.join(DICT_SRC, 'general.jsonl'))) {
+  const stats = await filterDict({ from: DICT_SRC, to: path.join(DST, 'data', 'danbooru'), stats: true })
+  if (!stats.ok) {
+    report.violations.push('data/danbooru：词表过滤失败 ' + stats.error + '（' + stats.message + '）')
+  } else {
+    report.dict = stats.files.map((f) => f.name + ' ' + f.lines + ' 行（丢 ' + f.removed + '）').join('，') + '；原因 ' + JSON.stringify(stats.removedBy)
+    if (!DRY) {
+      const done = await filterDict({ from: DICT_SRC, to: path.join(DST, 'data', 'danbooru'), force: true })
+      if (!done.ok) {
+        report.violations.push('data/danbooru：写盘失败 ' + done.error)
+      } else {
+        for (const item of done.files) {
+          const rel = 'data/danbooru/' + item.name
+          const text = readFileSync(path.join(DST, rel), 'utf8')
+          report.written.push(rel)
+          report.files++
+          if (FORBIDDEN.test(text)) {
+            /** @type {Array<[number, string]>} */
+            const bad = text.split('\n').map((l, i) => /** @type {[number, string]} */ ([i + 1, l])).filter((pair) => FORBIDDEN.test(pair[1]))
+            for (const pair of bad.slice(0, 4)) report.violations.push(rel + ':' + pair[0] + ' ' + String(pair[1]).trim().slice(0, 90))
+            if (bad.length > 4) report.violations.push(rel + '：另有 ' + (bad.length - 4) + ' 行没滤干净')
+          }
+        }
+        report.written.push('data/danbooru/manifest.json')
+        report.files++
+      }
+    }
+  }
 }
 
 // 公开版 package.json 里指向被跳过文件的 scripts 键必须删掉：
