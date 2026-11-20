@@ -112,6 +112,43 @@ const LINE_RULES = new Map([
 ])
 
 /** 整段替换（多行块）：原文必须逐字命中，否则报错。 */
+// 姿势 tag 映射表：公开版的 SFW 词表把性行为 / 性暗示那批词过滤掉了（Sex acts、Nudity 等分组），
+// 映射表若还产出它们，页面 chips 就会一片「不在库里」。这里把公开版换成同义但库里真有的词。
+LINE_RULES.set('lib/pose-tags.js', [
+  [
+    "  侧卧位: ['lying', 'on_side'],",
+    "  侧卧位: ['lying'],",
+  ],
+  [
+    "  '性感・大胆系': ['sexually_suggestive', 'seductive_smile'],",
+    "  '性感・大胆系': ['seductive_smile'],",
+  ],
+  [
+    "  立位: ['standing', 'standing_sex'],",
+    "  立位: ['standing'],",
+  ],
+  [
+    "  立位贴身: ['standing_sex', 'hug'],",
+    "  立位贴身: ['hug'],",
+  ],
+  [
+    "  '正常位（传教士）': ['missionary', 'on_back'],",
+    "  '正常位（传教士）': ['on_back'],",
+  ],
+  [
+    "  后入位: ['doggystyle', 'all_fours'],",
+    "  后入位: ['all_fours'],",
+  ],
+  [
+    "  骑乘位: ['cowgirl_position', 'girl_on_top'],",
+    "  骑乘位: ['straddling'],",
+  ],
+  [
+    "  { re: /捧胸|揉胸|托胸|摸胸|手抚胸/, tags: ['grabbing_own_breast'], why: '双手捧/揉胸' },",
+    "  { re: /捧胸|揉胸|托胸|摸胸|手抚胸/, tags: ['hand_on_own_chest'], why: '双手捧/揉胸' },",
+  ],
+])
+
 const BLOCK_RULES = new Map([
   // rules.js 的两段表（上下位对、精确桶的「性相关细节」整段）逐行写着露骨词，
   // 整行删会把数组 / 对象结构改坏，所以整块精确替换成不含露骨词的等价结构。
