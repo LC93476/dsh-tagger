@@ -1,0 +1,42 @@
+{
+  "source": "D:\\QUARK\\dsh-comfyui-workbench\\data\\danbooru",
+  "importedAt": "2026-11-20T07:27:05.099Z",
+  "minGeneralLines": 20000,
+  "files": [
+    {
+      "name": "general.jsonl",
+      "lines": 30693,
+      "tags": 30693,
+      "bytes": 5521509,
+      "sha256": "710541c349ea5ae26fc44d5b2c9875d77f0bc621aae6f0435822852a94a90aac"
+    },
+    {
+      "name": "characters.jsonl",
+      "lines": 35384,
+      "tags": 35384,
+      "bytes": 7484765,
+      "sha256": "4db15acb5b3a76a91c284ef385573554bb67297249183d0e2aa284e983e01e5e"
+    },
+    {
+      "name": "copyrights.jsonl",
+      "lines": 8414,
+      "tags": 8414,
+      "bytes": 2094226,
+      "sha256": "d3d924b2884286ffcc878fbadc615c1eca67a6f19ee35220c82f0a8d1c46093b"
+    },
+    {
+      "name": "artists.jsonl",
+      "lines": 24881,
+      "tags": 24881,
+      "bytes": 4484929,
+      "sha256": "82caaf1b4526fd5acd97e0011ef819af7cccf314f7421a7a7a242c412f016f9c"
+    },
+    {
+      "name": "groups.jsonl",
+      "lines": 15064,
+      "tags": 15064,
+      "bytes": 752097,
+      "sha256": "6a3f08c99f5aa5b2de086a55894697865099fc8be755f349cb7aacfca4f98253"
+    }
+  ]
+}

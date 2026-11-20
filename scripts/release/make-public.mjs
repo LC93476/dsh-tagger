@@ -409,6 +409,9 @@ if (existsSync(DST) && !DRY) {
 if (!DRY) mkdirSync(DST, { recursive: true })
 
 for (const rel of gitFiles()) {
+  // 全量词表快照（99k 词 / 20MB）不进公开版：它本身就是从 Danbooru 抽出来的数据，逐行都带露骨 tag，
+  // 会直接踩到下面的红线正则；公开版要用全量词表就自己跑 scripts/tags/import-dict.mjs。
+  if (rel === 'data/danbooru' || rel.startsWith('data/danbooru/')) { report.skipped.push(rel); continue }
   if (SKIP.has(rel)) { report.skipped.push(rel); continue }
   const ext = path.extname(rel).toLowerCase()
   // git 索引里可能还留着已被删掉的文件（重构期并行改动常见）：磁盘上没有就当它不存在，别让整趟生成挂掉。
