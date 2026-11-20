@@ -373,6 +373,17 @@ test('库里没有的词进 warnings；库未就绪时补一句说明', async ()
   assert.ok(result.warnings.includes('标签库尚未就绪，本条未做全量校对'))
 })
 
+test('库里没有但词根认得出桶的词，插回后仍归到它那一段（不打乱词序）', async () => {
+  // soft_lighting 不在 fake 词库里（真实快照里也没有），但词根规则能认出是光照段。
+  const payload = {
+    positive: [{ tag: '1girl' }, { tag: 'soft_lighting' }, { tag: 'from_side' }, { tag: 'smile' }],
+  }
+  const forge = makeForge({ llm: jsonStream(payload), tags: fakeTags(KNOWN) })
+  const result = await forge.generate({ text: '柔光，侧面' })
+
+  assert.ok(result.warnings.includes('soft_lighting 不在库里'))
+  assert.equal(result.positive, '1girl, smile, from_side, soft_lighting', '不在库里也不许打断段落顺序：主体 → 表情 → 镜头 → 光照')
+})
 test('超过 maxTags 截断并给 warning', async () => {
   const payload = { positive: Array.from({ length: 12 }, (_, i) => ({ tag: 'solo', weight: 1, cn: 'c' + i })) }
   const tags = fakeTags(KNOWN)
