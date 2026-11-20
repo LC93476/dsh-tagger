@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * tools/make-public.mjs —— 从私有仓库生成公开「和谐版」。
+ * scripts/release/make-public.mjs —— 从私有仓库生成公开「和谐版」。
  *
  * 策略（宁可少删，不可删坏）：
  *   1. jsonl 词表：命中红线的行整行丢（保留其余条目）
@@ -12,7 +12,7 @@
  *   7. README / 示例词表：用 public-src 下的公开版覆盖
  *   8. 红线复查：输出目录还有命中就报错退出
  *
- * 用法：node tools/make-public.mjs [--dst <目录>] [--dry]
+ * 用法：node scripts/release/make-public.mjs [--dst <目录>] [--dry]
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs'
@@ -20,7 +20,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(HERE, '..')
+const ROOT = path.resolve(HERE, '..', '..')
 const argv = process.argv.slice(2)
 const dstAt = argv.indexOf('--dst')
 const DST = path.resolve(dstAt >= 0 ? argv[dstAt + 1] : path.join(path.dirname(ROOT), 'DSh tagger-lite'))
@@ -49,16 +49,14 @@ const SKIP = new Set([
   'data/tags/general-nsfw.jsonl',
   // public-src 是本脚本的素材（README 覆盖版放在这里），本身不进公开版。
   'public-src/README.public.md',
-  // 仓库里遗留的一次性探针脚本，没有任何模块引用它。
-  'tests/_hint-probe.mjs',
   // 反向脚本（把私有提示词注入回公开版）当然也不进公开版。
-  'tools/inject-private.mjs',
+  'scripts/release/inject-private.mjs',
   // 注入包打包器与它的用例：都引用了上面那份反向脚本，公开版里没有。
-  'scripts/pack-inject.mjs',
+  'scripts/release/pack-inject.mjs',
   'tests/pack-inject.test.mjs',
   // 生成脚本自己不进公开版：它的表里逐字写着红线词，整行丢掉后只剩一个残缺的分词器，
   // 而公开仓库本来就不需要重新生成一次公开版。
-  'tools/make-public.mjs',
+  'scripts/release/make-public.mjs',
 ])
 
 const OVERRIDE = new Map([['README.md', 'public-src/README.public.md']])
@@ -413,6 +411,8 @@ if (!DRY) mkdirSync(DST, { recursive: true })
 for (const rel of gitFiles()) {
   if (SKIP.has(rel)) { report.skipped.push(rel); continue }
   const ext = path.extname(rel).toLowerCase()
+  // git 索引里可能还留着已被删掉的文件（重构期并行改动常见）：磁盘上没有就当它不存在，别让整趟生成挂掉。
+  if (!existsSync(path.join(ROOT, rel))) { report.skipped.push(rel); continue }
   let text = OVERRIDE.has(rel) ? readText(OVERRIDE.get(rel)) : readText(rel)
   text = scrub(rel, ext, text)
   const lineCount = text.split('\n').length

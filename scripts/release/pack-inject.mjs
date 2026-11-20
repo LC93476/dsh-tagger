@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * scripts/pack-inject.mjs — 打「注入包」：把私货提示词 + 注入脚本装成一个能拷走的 zip。
+ * scripts/release/pack-inject.mjs — 打「注入包」：把私货提示词 + 注入脚本装成一个能拷走的 zip。
  *
- * 为什么要单独打一个包：注入脚本原本只认仓库布局（tools/ 上一级就是私有仓）。
+ * 为什么要单独打一个包：注入脚本原本只认仓库布局（scripts/release/ 往上两级就是私有仓）。
  * 换台机器、或者只想把「注入能力」交给别人时，光拷一个 .mjs 没用 —— 六份私货文件也得跟着走。
  * 所以包里的布局是：
  *   dsh-tagger-inject-<版本>/
@@ -13,17 +13,17 @@
  *     MANIFEST.txt              每份文件的 sha256 前 16 位
  *
  * 用法：
- *   node scripts/pack-inject.mjs                 # 出 dist/dsh-tagger-inject-<版本>/ 与同名 zip
- *   node scripts/pack-inject.mjs --out /tmp/x    # 换输出目录
- *   node scripts/pack-inject.mjs --no-zip        # 只要目录
- *   node scripts/pack-inject.mjs --quiet         # 只报结果
+ *   node scripts/release/pack-inject.mjs                 # 出 dist/dsh-tagger-inject-<版本>/ 与同名 zip
+ *   node scripts/release/pack-inject.mjs --out /tmp/x    # 换输出目录
+ *   node scripts/release/pack-inject.mjs --no-zip        # 只要目录
+ *   node scripts/release/pack-inject.mjs --quiet         # 只报结果
  */
 import { createHash } from 'node:crypto'
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { INJECT_FILES } from '../tools/inject-private.mjs'
+import { INJECT_FILES } from './inject-private.mjs'
 import { makeZip, readVersion, ROOT } from './pack.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -125,7 +125,7 @@ function readmeText(version, rows) {
     '  - 写盘前自动备份到本包目录的 .inject-backups\\<时间戳>\\（含 manifest.json，记 sha256 与',
     '    「注入前是否存在」），--restore 能精确回滚，包括删掉注入前本来不存在的文件。',
     '  - 注入后的目标目录不要 git push 到公开仓。想回干净公开版：--restore，或重跑私货仓的',
-    '    node tools/make-public.mjs。',
+    '    node scripts/release/make-public.mjs。',
     '  - 包里的 payload/ 是明文私货，别传到公开仓库或网盘公开链接。',
     '',
     '六、找不到 node 时：',
@@ -165,7 +165,7 @@ export function makeInjectPack(options = {}) {
     manifest.push(rel + '  ' + createHash('sha256').update(buf).digest('hex').slice(0, 16) + '  ' + buf.length)
   }
 
-  put('inject-private.mjs', readFileSync(path.join(root, 'tools', 'inject-private.mjs')))
+  put('inject-private.mjs', readFileSync(path.join(root, 'scripts', 'release', 'inject-private.mjs')))
   const rows = []
   for (const item of INJECT_FILES) {
     const from = path.join(root, item.rel)
@@ -211,7 +211,7 @@ function parseArgs(argv) {
     if (token === '--zip') { out.zip = true; continue }
     if (token === '--quiet') { out.quiet = true; continue }
     if (token === '--help' || token === '-h') {
-      console.log('用法：node scripts/pack-inject.mjs [--out <目录>] [--no-zip] [--quiet]')
+      console.log('用法：node scripts/release/pack-inject.mjs [--out <目录>] [--no-zip] [--quiet]')
       process.exit(0)
     }
   }

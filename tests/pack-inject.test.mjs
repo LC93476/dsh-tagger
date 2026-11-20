@@ -6,9 +6,9 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { INJECT_FILES } from '../tools/inject-private.mjs'
-import { ROOT } from '../scripts/pack.mjs'
-import { makeInjectPack } from '../scripts/pack-inject.mjs'
+import { INJECT_FILES } from '../scripts/release/inject-private.mjs'
+import { ROOT } from '../scripts/release/pack.mjs'
+import { makeInjectPack } from '../scripts/release/pack-inject.mjs'
 
 /** 在临时目录里跑包内注入脚本（用宿主 electron 当 node）。 */
 function runPacked(pkgDir, args) {

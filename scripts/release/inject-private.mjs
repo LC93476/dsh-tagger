@@ -2,7 +2,7 @@
 /**
  * 把私有版（本仓库）的提示词与词表一键注入到公开版（默认 ../DSh tagger-lite）。
  *
- * 背景：tools/make-public.mjs 生成公开版时会做三件事 ——
+ * 背景：scripts/release/make-public.mjs 生成公开版时会做三件事 ——
  *   1. 整份丢掉 data/tags/general-nsfw.jsonl（SKIP）；
  *   2. 含露骨词的整行丢掉（data/tags/pose-view.jsonl、seed-08-adult.jsonl、lib/zh-intent.js 的体位条目）；
  *   3. 整块替换成不含露骨词的等价结构（lib/purge.js 的提示词、lib/postprocess/rules.js 的分桶表）。
@@ -10,17 +10,17 @@
  * 于是公开版 = 私货全量版（同一套破甲提示词 + 同一套词表）。
  *
  * 用法：
- *   node tools/inject-private.mjs                 # 注入（默认目标 ../DSh tagger-lite）
- *   node tools/inject-private.mjs --dry           # 只列表，不写盘
- *   node tools/inject-private.mjs --check         # 已最新 → 退出码 0；有差异 → 1
- *   node tools/inject-private.mjs --dst <目录>    # 指定目标仓
- *   node tools/inject-private.mjs --only prompt,tags
- *   node tools/inject-private.mjs --verify        # 注入后跑一遍目标仓的词表自检
- *   node tools/inject-private.mjs --restore       # 用最近一次备份还原
- *   node tools/inject-private.mjs --restore <名>  # 用指定备份还原
+ *   node scripts/release/inject-private.mjs                 # 注入（默认目标 ../DSh tagger-lite）
+ *   node scripts/release/inject-private.mjs --dry           # 只列表，不写盘
+ *   node scripts/release/inject-private.mjs --check         # 已最新 → 退出码 0；有差异 → 1
+ *   node scripts/release/inject-private.mjs --dst <目录>    # 指定目标仓
+ *   node scripts/release/inject-private.mjs --only prompt,tags
+ *   node scripts/release/inject-private.mjs --verify        # 注入后跑一遍目标仓的词表自检
+ *   node scripts/release/inject-private.mjs --restore       # 用最近一次备份还原
+ *   node scripts/release/inject-private.mjs --restore <名>  # 用指定备份还原
  *
  * 安全提示：注入后的目录**不要** git push 到公开仓。想回到干净公开版，
- * 就重跑 node tools/make-public.mjs，或者 --restore 回到注入前。
+ * 就重跑 node scripts/release/make-public.mjs，或者 --restore 回到注入前。
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, copyFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -29,9 +29,9 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(HERE, '..')
+const ROOT = path.resolve(HERE, '..', '..')
 const SELF = process.argv[1] ? path.resolve(process.argv[1]) : ''
-// 两种布局：仓库里（tools/inject-private.mjs，源在上一级）；打包后（<包>/inject-private.mjs，源在 <包>/payload/）
+// 两种布局：仓库里（scripts/release/inject-private.mjs，源在上两级）；打包后（<包>/inject-private.mjs，源在 <包>/payload/）
 const PKG_LAYOUT = existsSync(path.join(HERE, 'payload'))
 const SRC_ROOT = PKG_LAYOUT ? path.join(HERE, 'payload') : ROOT
 const argv = process.argv.slice(2)
@@ -147,10 +147,10 @@ function latestBackup() {
   return names.length ? path.join(BACKUP_ROOT, names[names.length - 1]) : null
 }
 
-/** 注入后跑一遍目标仓的词表自检（只在目标仓有 scripts/check-tags.mjs 时）。 */
+/** 注入后跑一遍目标仓的词表自检（只在目标仓有 scripts/tags/check-tags.mjs 时）。 */
 function verify() {
-  const check = path.join(DST, 'scripts', 'check-tags.mjs')
-  if (!existsSync(check)) { console.log('· 目标仓没有 scripts/check-tags.mjs，跳过自检'); return true }
+  const check = path.join(DST, 'scripts', 'tags', 'check-tags.mjs')
+  if (!existsSync(check)) { console.log('· 目标仓没有 scripts/tags/check-tags.mjs，跳过自检'); return true }
   const r = spawnSync(process.execPath, [check], { cwd: DST, encoding: 'utf8' })
   const out = ((r.stdout ?? '') + (r.stderr ?? '')).trim()
   if (out) console.log(out)
@@ -196,7 +196,7 @@ if (restoreArg >= 0) {
         writeFileSync(it.dstPath, it.src)
       }
       console.log('✓ 注入完成：' + pending.length + ' 份文件' + (dir ? '（原文件已备份到 ' + dir + '）' : ''))
-      const hint = PKG_LAYOUT ? 'inject.cmd "' + DST + '" --restore' : 'node tools/inject-private.mjs --restore'
+      const hint = PKG_LAYOUT ? 'inject.cmd "' + DST + '" --restore' : 'node scripts/release/inject-private.mjs --restore'
       console.log('  公开版现在是私货全量版 —— 不要 git push 到公开仓；要还原：' + hint)
       if (VERIFY && !verify()) { console.error('× 目标仓词表自检失败'); process.exitCode = 1 }
     }
