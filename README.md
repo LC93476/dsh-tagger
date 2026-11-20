@@ -236,6 +236,16 @@ node server/standalone.mjs --port 7789 --base-url https://api.example.com/v1 --a
 `data/tags/*.jsonl` 是自带补丁词表；用户自己的放 `~/.dsh-tagger/tags/*.jsonl`
 （每行 `{"tag":"...","cn":"中文","aliases":["同义词"]}`）。两个目录都会加载，改完下一次查询自动重建索引。
 
+随包词表现在一共 **1247 行**：四个主文件（`general-nsfw` 154 / `pose-view` 274 / `quality-common` 30 / `scene-common` 53）
+拥有词条，`data/tags/seed/*.jsonl` 十三份（736 行）只补主文件没有的词。改词表前先记住三条：
+
+- **合并语义**：同一条词在多份文件出现时，字典序靠前的赢中文（`general-nsfw → pose-view → quality-common → scene-common`），靠后的只贡献更大的 `postCount` 与额外 `aliases`；seed 用 `if (!entries.has(key))`，只补空位、永不覆盖。
+- **去重**：删「靠后那份」的行，删之前把它独有的 `aliases` 并进保留行（并集不会自动继承）。
+- **只收库内真词**：`lib/postprocess/rules.js` 的桶表尤其如此 —— 表里混进库里没有的词，只会误导后面维护的人（`tests/postprocess.test.mjs` 有「幽灵词」断言）。
+
+改完 `data/tags/**` 跑一次 `node scripts/check-overlay-tags.mjs`（不在库 / 缺中文 / 跨文件重复 / 别名不规范 / `POSE_HINTS` 不在库，五类一次报全），
+取材用 `node scripts/suggest-overlay.mjs --group Posture --limit 40`（按热度吐「库里真有但没收录」的候选词，带 danbooru 分组与中文名）。
+
 ## 本地三道后处理（白话 → 标签的兜底）
 
 模型只负责"看图说话"，拼写与排序靠本地三道确定性处理，任何一道出错都只记 warning、不打断锻造：
