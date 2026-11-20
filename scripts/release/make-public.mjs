@@ -204,7 +204,7 @@ const EXTRA = new Map([
   ].join('\n')]
 ])
 
-const report = { files: 0, skipped: [], oversize: {}, arrays: {}, tests: {}, lines: {}, global: {}, written: [], violations: [], dry: DRY }
+const report = { files: 0, skipped: [], oversize: {}, arrays: {}, tests: {}, lines: {}, global: {}, written: [], violations: [], scripts: [], dry: DRY }
 
 /**
  * 取要处理的文件：tracked + 未被 .gitignore 忽略的未跟踪文件。
@@ -447,6 +447,27 @@ for (const [rel, content] of EXTRA) {
   report.files++
 }
 
+// 公开版 package.json 里指向被跳过文件的 scripts 键必须删掉：
+// 比如 pack:inject 与 publish:lite 的实现（pack-inject.mjs / make-public.mjs）本身不进公开版，
+// 留着就成了「指向不存在的文件」，check:layout 与 tests/layout.test.mjs 在公开版会直接红。
+// 只按磁盘事实判断，不写死键名：scripts 里每个 node <文件> 目标在 DST 里不存在就删掉这个键。
+if (!DRY) {
+  const pkgPath = path.join(DST, 'package.json')
+  if (existsSync(pkgPath)) {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    if (pkg !== null && typeof pkg === 'object' && pkg.scripts !== null && typeof pkg.scripts === 'object') {
+      for (const [key, value] of Object.entries(pkg.scripts)) {
+        const hit = /node\s+(?:\.\/)?([\w./-]+\.m?js)/.exec(String(value))
+        if (hit === null) continue
+        if (existsSync(path.join(DST, hit[1]))) continue
+        delete pkg.scripts[key]
+        report.scripts.push(key + ' -> ' + hit[1])
+      }
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
+    }
+  }
+}
+
 // 目录成分自检：构建产物 / 日志 / 缓存一律不许出现；非 dry 时逐个确认确实写到了盘上。
 for (const rel of report.written) {
   if (BANNED_PATH.test(rel)) report.violations.push(rel + '：构建产物 / 日志 / 缓存不许进公开版')
@@ -466,6 +487,10 @@ show('数组元素（POSE_HINTS / SEED_TAGS）', report.arrays)
 show('测试用例整块', report.tests)
 show('整行丢弃', report.lines)
 show('本机路径改写', report.global)
+if (report.scripts.length > 0) {
+  console.log('\n公开版 package.json 删掉的 scripts 键：')
+  for (const s of report.scripts) console.log('  ' + s)
+}
 if (Object.keys(report.oversize).length > 0) {
   console.log('\n超过 ' + MAX_LINES + ' 行整份丢弃：')
   for (const [k, v] of Object.entries(report.oversize)) console.log('  ' + k + ' × ' + v + ' 行')

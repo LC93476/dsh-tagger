@@ -160,6 +160,8 @@ npm run publish:lite   # 生成公开版到 ../DSh tagger-lite（--dst / --dry�
 
 便携包里是「能独立起 web 服务」的全部（`lib/ server/ client/ data/ locale/ types/` 加文档与部署脚本），不带 `tests/`、`scripts/`（只带 `scripts/win`）、`public-src/`。公开版由 `scripts/release/make-public.mjs` 按红线裁出来；要把私货提示词与词表注入回去，用 `scripts/release/inject-private.mjs`（`--dry` 只列表、`--check` 比差异、`--verify` 注入后自检、`--restore` 回滚）。
 
+生成公开版时会顺手把 `package.json` 里指向被裁文件的 scripts 键删掉（`pack:inject`、`publish:lite`——它们依赖的 `pack-inject.mjs` / `make-public.mjs` 不进公开版）。判断依据是磁盘事实：scripts 里每个 `node <文件>` 目标在输出目录里不存在就删该键，所以公开版自己跑 `npm run check:layout` 也是绿的。
+
 ## 参与贡献
 
 提 PR 之前请先看 [CONTRIBUTING.md](CONTRIBUTING.md)，并保证 `npm run check` 全绿（词表改了至少跑一次 `npm run check:overlay`）。开 issue 用仓库里的模板；改动碰 `lib/forge/` 或 `lib/postprocess/` 时顺手补一条测试。
