@@ -91,7 +91,7 @@ LLM 只负责「把话听懂」，剩下的规范化全在本地做，所以结�
 
 快照现在**就放在仓库里**：`data/danbooru/` 下五份 jsonl（general 30693 / characters 35384 / copyrights 8414 / artists 24881 / groups 15064，约 20MB），所以任何一份 checkout 或下载版解压后开箱就是 99447 条，不必再配环境变量。
 
-装/刷新快照只跑一条命令：`node scripts/tags/import-dict.mjs`（自动探测 `DSH_DANBOORU_DIR` > `~/.dsh-comfyui-workbench/data/danbooru`，也可 `--from <目录>` 指定）；`--check` 只校验仓库里那份与源是否一致（不一致退出码 1，适合放进 CI 前的手工核对），`--dry` 只看计划，目标已存在且不同时默认拒绝、要覆盖加 `--force`。导入会顺带写 `data/danbooru/manifest.json` 记行数、字节与 sha256。
+装/刷新快照只跑一条命令：`node scripts/tags/import-dict.mjs`（自动探测 `DSH_DANBOORU_DIR` > `~/.dsh-comfyui-workbench/data/danbooru`，也可 `--from <目录>` 指定）；`--check` 只校验、不写盘：有源目录时比 sha256，没有源目录时拿 `data/danbooru/manifest.json` 自检（不一致退出码 1，适合放进 CI 前的手工核对），`--dry` 只看计划，目标已存在且不同时默认拒绝、要覆盖加 `--force`。导入会顺带写 `data/danbooru/manifest.json` 记行数、字节与 sha256。
 
 运行时探测顺序：`--dict-dir` > `DSH_DANBOORU_DIR` > `DSH_COMFYUI_DATA_DIR` > `~/.dsh-comfyui-workbench/data{,/danbooru}` > **仓库的 `data/danbooru`** > 相邻的 `dsh-comfyui-workbench/data{,/danbooru}` > `<数据目录>/tags`；一条都命中不了才退化成只用 seed + overlay 的 1247 条。
 
