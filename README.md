@@ -2,7 +2,7 @@
 
 > 白话描述 → **WD（Danbooru）+ Camie** 标准标签 → 直接投递本机 ComfyUI。省掉「再找一个 LLM 把话转成 tag」那一跳。
 
-面板挂在 DSH 左侧栏，也能单独起 web 服务（默认 `http://127.0.0.1:7789/`）。锻造走宿主的 llm 服务（默认 provider `opencode-go`、model `deepseek-v4.1-flash`）加一层破甲提示词；出 tag 之后再叠三道**本地**后处理（规范对齐 / 修复未知词 / 中文意图映射），所以同一段白话反复锻造不会飘。
+自带一个独立 web 服务（默认 `http://127.0.0.1:7789/`），浏览器打开就是锻造台。锻造走 OpenAI 兼容的模型接口（默认 provider `opencode-go`、model `deepseek-v4.1-flash`）加一层破甲提示词；出 tag 之后再叠三道**本地**后处理（规范对齐 / 修复未知词 / 中文意图映射），所以同一段白话反复锻造不会飘。
 
 ## 快速开始
 
@@ -21,9 +21,8 @@
 ```
 dsh-tagger/
 ├─ bin/tagger.mjs          唯一命令行入口（dsh-tagger）
-├─ index.js  client.js     DSH 插件入口：宿主侧服务 / 左侧栏面板
-├─ client/                 面板前端（原生 JS，无构建步骤）
-├─ server/                 独立 web 服务与 standalone 入口
+├─ index.js               装配入口：createRuntime + createHandlers
+├─ server/                 独立 web 服务（standalone.mjs）与 web 面板静态资源
 ├─ lib/                    锻造、精修、后处理、词表索引、ComfyUI 客户端、路由、MCP、SPI
 ├─ data/tags/              词表 overlay（jsonl）+ 大词库快照
 ├─ locale/                 中英文案
@@ -34,8 +33,7 @@ dsh-tagger/
 │   ├─ release/            pack / pack-inject / make-public / inject-private / ui2api
 │   ├─ assets/             姿势缩略图生成（Python）
 │   └─ win/                Windows 启停脚本（根目录的 .cmd/.vbs 只是转发）
-├─ tests/                  22 个测试套件（node:test，零依赖）
-├─ types/                  host.d.ts
+├─ tests/                  21 个测试套件（node:test，零依赖）
 ├─ docs/                   文档索引见 docs/README.md
 ├─ start.cmd  start.sh     一键启动
 ├─ deploy.cmd  deploy.sh   三行转发（等价于 start）
@@ -66,11 +64,9 @@ npm link && dsh-tagger --help                          # 用 bin 名
 ELECTRON_RUN_AS_NODE=1 "C:/Users/<你>/AppData/Local/Programs/DeepSeek Harness/DeepSeek Harness.exe" bin/tagger.mjs --port 7789
 ```
 
-## 装成 DSH 插件
+## MCP
 
-仓库里带 `cordis.patch.yml`，DSH 启动时按 `package.json` 的 `dsh.bundle.patch` 加载：宿主侧注册 `/tagger/api/*` 路由，客户端把面板注入左侧栏（`dsh.client.inject`）。旧前缀 `/prompt-forge/api` 仍然兼容，升级不会把已有配置和别的插件调坏。
-
-面板外还开了 MCP：`POST /tagger/api/mcp`，`tools` 列表里能看到 `forge_tags` 等工具，别的插件或 agent 可以直接调锻造，不用自己拼提示词。
+独立服务自带 MCP 端点 `POST /tagger/api/mcp`：任何 MCP 客户端（agent、编辑器、自写脚本）连上来就能看到 `forge_tags`、`refine_tags`、`comfy_run` 等工具，直接调锻造与出图，不用自己拼提示词。接口前缀是 `/tagger/api`，旧前缀 `/prompt-forge/api` 仍然兼容。
 
 ## 面板能干什么
 
@@ -122,7 +118,7 @@ npm run check
 单跑某一道：
 
 ```bash
-npm test           # 22 个套件，node:test，零依赖
+npm test           # 21 个套件，node:test，零依赖
 npm run typecheck  # tsc --noEmit
 npm run bench      # 本地计算层基准，超预算 exit 1（数字见 docs/PERF.md）
 ```
@@ -158,7 +154,7 @@ npm run pack:inject    # → dist/dsh-tagger-inject-<版本>/ 与同名 zip（�
 npm run publish:lite   # 生成公开版到 ../DSh tagger-lite（--dst / --dry）
 ```
 
-便携包里是「能独立起 web 服务」的全部（`lib/ server/ client/ data/ locale/ types/` 加文档与部署脚本），不带 `tests/`、`scripts/`（只带 `scripts/win`）、`public-src/`。公开版由 `scripts/release/make-public.mjs` 按红线裁出来；要把私货提示词与词表注入回去，用 `scripts/release/inject-private.mjs`（`--dry` 只列表、`--check` 比差异、`--verify` 注入后自检、`--restore` 回滚）。
+便携包里是「能独立起 web 服务」的全部（`bin/ index.js lib/ server/ data/ locale/` 加文档与部署脚本），不带 `tests/`、`scripts/`（只带 `scripts/win`）、`public-src/`。公开版由 `scripts/release/make-public.mjs` 按红线裁出来；要把私货提示词与词表注入回去，用 `scripts/release/inject-private.mjs`（`--dry` 只列表、`--check` 比差异、`--verify` 注入后自检、`--restore` 回滚）。
 
 生成公开版时会顺手把 `package.json` 里指向被裁文件的 scripts 键删掉（`pack:inject`、`publish:lite`——它们依赖的 `pack-inject.mjs` / `make-public.mjs` 不进公开版）。判断依据是磁盘事实：scripts 里每个 `node <文件>` 目标在输出目录里不存在就删该键，所以公开版自己跑 `npm run check:layout` 也是绿的。
 

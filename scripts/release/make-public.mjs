@@ -208,8 +208,8 @@ const report = { files: 0, skipped: [], oversize: {}, arrays: {}, tests: {}, lin
 
 /**
  * 取要处理的文件：tracked + 未被 .gitignore 忽略的未跟踪文件。
- * 只取 tracked 会把重构后新加的文件（lib/forge/*、lib/refine/*、lib/tags/*、client/*、
- * server/public/*、docs/PERF.md、scripts/*、types/host.d.ts …）漏在公开版之外，
+ * 只取 tracked 会把重构后新加的文件（lib/forge/*、lib/refine/*、lib/tags/*、
+ * server/public/*、docs/PERF.md、scripts/* …）漏在公开版之外，
  * 于是公开仓库缺一堆被 index.js import 的模块。--others --exclude-standard 让新增文件也进来，
  * 同时继续遵守 .gitignore（node_modules / tagger.env.cmd / tmp / Windows 设备名占位 CON 都不进来）。
  */
