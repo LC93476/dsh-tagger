@@ -144,6 +144,18 @@ LINE_RULES.set('lib/pose-tags.js', [
     "  骑乘位: ['straddling'],",
   ],
   [
+    "  { re: /遮单眼|手遮单眼/, tags: ['covering_one_eye'], why: '手遮单眼' },",
+    "  { re: /遮单眼|手遮单眼/, tags: ['hand_on_own_face'], why: '手遮单眼' },",
+  ],
+  [
+    "  { re: /掩口|捂嘴/, tags: ['covering_own_mouth'], why: '掩口' },",
+    "  { re: /掩口|捂嘴/, tags: ['hand_on_own_face'], why: '掩口' },",
+  ],
+  [
+    "  { re: /腋下/, tags: ['armpits'], why: '展露腋下' },",
+    "  { re: /腋下/, tags: ['armpit_peek'], why: '展露腋下' },",
+  ],
+  [
     "  { re: /捧胸|揉胸|托胸|摸胸|手抚胸/, tags: ['grabbing_own_breast'], why: '双手捧/揉胸' },",
     "  { re: /捧胸|揉胸|托胸|摸胸|手抚胸/, tags: ['hand_on_own_chest'], why: '双手捧/揉胸' },",
   ],
