@@ -99,6 +99,26 @@ LLM 只负责「把话听懂」，剩下的规范化全在本地做，所以结�
 
 词表装在别处（比如 `D:/QUARK/dsh-comfyui-workbench/data/danbooru`）时，在 `settings.json` 里写 `"tags": { "dataDirs": ["D:/QUARK/dsh-comfyui-workbench/data/danbooru"] }` 即可，不必每次开服务都带环境变量。面板顶部会显示索引条数：`99447` 是真词表，`1247` 说明只读到 seed。
 
+## 模型档案
+
+不同模型的文本编码器吃不同的写法：SDXL 动漫微调吃 Danbooru tag，Flux / SD3.5 / 写实类吃自然语言句子。
+差别只在三件事上 —— 串首放什么质量词、要不要自动补、要不要按 14 段重排 —— 所以一个开关就够：
+
+| `forge.profile` | 适用模型 | 效果 |
+| --- | --- | --- |
+| `tag`（默认） | Illustrious / NoobAI / Anima / Animagine | `masterpiece, best_quality, highres` 置顶；补质量词；按 14 段重排 |
+| `pony` | Pony Diffusion V6 及其融合版 | `score_9, score_8_up, score_7_up, source_anime` 置顶；其余同 `tag` |
+| `natural` | Flux / SD3.5 / 写实类 | 不补质量词（交给工作流）；不重排，保留模型给的短语顺序与空格（不 tag 化）；模型被要求输出英文短语而不是 tag 堆砌 |
+| `custom` | 自己拿主意 | 三个值读 `forge.quality` / `forge.order` / `tags.qualityTags` |
+
+```json
+{ "forge": { "profile": "pony" } }
+```
+
+前三档会**接管**质量词、质量开关与词序开关：面板与 `GET /profiles` 显示的是生效值，手改 `tags.qualityTags` 或
+`forge.quality` 都会被档案覆盖（不是静默失效 —— 看到的就是真正在用的值）。要自己填质量词、自己决定排不排序，
+把 `profile` 设成 `custom`，然后照原来的方式写 `tags.qualityTags`、`forge.quality`、`forge.order`。
+
 ## 词表
 
 一行一个词条，UTF-8 无 BOM，字段固定：
