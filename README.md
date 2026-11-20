@@ -91,6 +91,8 @@ LLM 只负责「把话听懂」，剩下的规范化全在本地做，所以结�
 
 快照本身不进仓库，运行时按顺序探测（`--dict-dir` > `DSH_DANBOORU_DIR` > `~/.dsh-comfyui-workbench/data` > 仓库里打包的 `data/danbooru` > 相邻的 `dsh-comfyui-workbench/data`，详见 [INSTALL.md](INSTALL.md)）；探测不到时退化成只用 seed + overlay 的 1247 条。
 
+词表装在别处（比如 `D:/QUARK/dsh-comfyui-workbench/data/danbooru`）时，在 `settings.json` 里写 `"tags": { "dataDirs": ["D:/QUARK/dsh-comfyui-workbench/data/danbooru"] }` 即可，不必每次开服务都带环境变量。面板顶部会显示索引条数：`99447` 是真词表，`1247` 说明只读到 seed。
+
 ## 词表
 
 一行一个词条，UTF-8 无 BOM，字段固定：
