@@ -89,6 +89,8 @@ LLM 只负责「把话听懂」，剩下的规范化全在本地做，所以结�
 
 词表快照来自 `dsh-comfyui-workbench`（99470 条 Danbooru 词条），本仓库的 overlay 只放「快照里没有、但我们常用」的词与中文别名。
 
+快照本身不进仓库，运行时按顺序探测（`--dict-dir` > `DSH_DANBOORU_DIR` > `~/.dsh-comfyui-workbench/data` > 仓库里打包的 `data/danbooru` > 相邻的 `dsh-comfyui-workbench/data`，详见 [INSTALL.md](INSTALL.md)）；探测不到时退化成只用 seed + overlay 的 1247 条。
+
 ## 词表
 
 一行一个词条，UTF-8 无 BOM，字段固定：
