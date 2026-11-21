@@ -135,15 +135,28 @@ test('listStyles：组与卡片是浅拷贝，改动不污染源表', () => {
 
 test('styleById：容忍大小写 / 空格 / 下划线，未知给 null', () => {
   const first = STYLES[0]
-  assert.equal(styleById(first.id), first)
-  assert.equal(styleById(first.id.toUpperCase()), first)
-  assert.equal(styleById('  ' + first.id + '  '), first)
-  assert.equal(styleById(first.id.replace(/-/g, ' ')), first)
-  assert.equal(styleById(first.id.replace(/-/g, '_')), first)
-  assert.equal(styleById('Film Noir Look'), STYLES.find(style => style.id === 'film-noir-look'))
+  assert.deepEqual(styleById(first.id), first)
+  assert.deepEqual(styleById(first.id.toUpperCase()), first)
+  assert.deepEqual(styleById('  ' + first.id + '  '), first)
+  assert.deepEqual(styleById(first.id.replace(/-/g, ' ')), first)
+  assert.deepEqual(styleById(first.id.replace(/-/g, '_')), first)
+  assert.deepEqual(styleById('Film Noir Look'), STYLES.find(style => style.id === 'film-noir-look'))
   assert.equal(styleById('no-such-style'), null)
   assert.equal(styleById(''), null)
   assert.equal(styleById(undefined), null)
+})
+
+test('styleById：命中返回浅拷贝，改返回值不污染 STYLES', () => {
+  const hit = styleById('film-noir-look')
+  const source = STYLES.find(style => style.id === 'film-noir-look')
+  assert.notEqual(hit, source, '必须是拷贝，不是源对象')
+  assert.notEqual(hit.tags, source.tags, 'tags 数组也要另起一份')
+  hit.tags.push('__junk__')
+  hit.title = '__junk__'
+  assert.ok(!source.tags.includes('__junk__'))
+  assert.notEqual(source.title, '__junk__')
+  // 再取一次还是干净的
+  assert.ok(!styleById('film-noir-look').tags.includes('__junk__'))
 })
 
 test('tagsOfStyles：按 ids 顺序展开、去重保序、未知 id 静默跳过', () => {
@@ -196,6 +209,54 @@ test('mergeStylePrompt：样式在前、原文在后、空片段丢弃', () => {
   const both = mergeStylePrompt(['golden-hour', 'moonlight-hour'], 'a girl')
   assert.ok(both.startsWith('golden_hour, sunlight, backlighting'), '实际：' + both)
   assert.ok(both.endsWith(', a girl'))
+})
+
+test('side-profile：用 from_side + silhouette，不再带会被同义合并删掉的 profile', () => {
+  const card = STYLES.find(style => style.id === 'side-profile')
+  assert.deepEqual(card.tags, ['from_side', 'silhouette'])
+  assert.ok(!card.tags.includes('profile'), 'profile 与 from_side 同义，会被后处理删掉')
+  assert.deepEqual(tagsOfStyles(['side-profile']), ['from_side', 'silhouette'])
+})
+
+test('tagsOfStyles：current 是字符串时按中英文逗号 / 顿号 / 换行切开', () => {
+  const golden = STYLES.find(style => style.id === 'golden-hour')
+  const rest = golden.tags.filter(tag => tag !== 'sunlight' && tag !== 'backlighting')
+
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: 'sunlight，其他\nbacklighting' }), rest)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: 'sunlight, other, backlighting' }), rest)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: 'sunlight、其他\n\nbacklighting' }), rest)
+  // 整串只有一个词
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: 'sunlight' }), golden.tags.filter(tag => tag !== 'sunlight'))
+})
+
+test('bareTag（间接）：嵌套括号 / 花括号 / 双冒号权重 / 反斜杠转义都算同一个词', () => {
+  const golden = STYLES.find(style => style.id === 'golden-hour')
+  const withoutSunlight = golden.tags.filter(tag => tag !== 'sunlight')
+  const withoutBacklight = golden.tags.filter(tag => tag !== 'backlighting')
+
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['((sunlight))'] }), withoutSunlight)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['{{sunlight}}'] }), withoutSunlight)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['[sunlight]'] }), withoutSunlight)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['sunlight::1.2'] }), withoutSunlight)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['(sunlight::1.2)'] }), withoutSunlight)
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['\\(backlighting\\)'] }), withoutBacklight)
+  // 权重写在括号外、括号写两层，也剥得干净
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['((backlighting)):1.4'] }), withoutBacklight)
+  // 词本身没被包起来时不受影响
+  assert.deepEqual(tagsOfStyles(['golden-hour'], { current: ['sunlight'] }), withoutSunlight)
+})
+
+test('mergeStylePrompt：中文逗号 / 换行输入不重复补词', () => {
+  const noir = STYLES.find(style => style.id === 'film-noir-look')
+  const merged = mergeStylePrompt(['film-noir-look'], 'high contrast，a girl on a rooftop')
+  assert.equal(merged, 'greyscale, film_grain, high contrast，a girl on a rooftop')
+  assert.equal(merged.split('high contrast').length - 1, 1, 'high_contrast 只出现一次')
+
+  const wrapped = mergeStylePrompt(['golden-hour'], '((sunlight))::1.3\na girl')
+  assert.equal(wrapped.split('sunlight').length - 1, 1, '带权重写法的 sunlight 不该再补一遍')
+  assert.ok(wrapped.startsWith('golden_hour, backlighting'), '实际：' + wrapped)
+  assert.ok(wrapped.endsWith('((sunlight))::1.3\na girl'), '原文本要原样保留：' + wrapped)
+  assert.deepEqual(noir.tags.length, 3)
 })
 
 test('真词表：每个 tag 都在 data/danbooru/general.jsonl 里', t => {

@@ -318,3 +318,80 @@ test('/ref-tags：模块没就位回 501，就位后结构与错码都稳定', a
   }
   assert.ok(REF_KINDS.costume.sets.length === 2, '服装库是两个目录合并')
 })
+/** 只放「名字里没有、标签里有」的服装 + 一条大写英文关键词，用来验中文标签搜索。 */
+function makeTagRoot() {
+  const root = fs.mkdtempSync(path.join(SANDBOX, 'tags-'))
+  const at = path.join(root, NODE_REL, 'skills', 'costume-reference', 'references')
+  fs.mkdirSync(at, { recursive: true })
+  fs.writeFileSync(path.join(at, 'catalog.csv'), [
+    'id,分类,服装名称,标签,英文关键词,图片',
+    'SPR-0101,春季穿搭,条纹上衣,藏青 条纹,STRIPED KNIT,../../img/costume/SPR-0101.webp',
+    'SPR-0102,春季穿搭,白衬衫,白色 衬衫,white shirt,../../img/costume/SPR-0102.webp',
+  ].join('\n'))
+  return root
+}
+
+test('q 要搜到中文标签（名称里没有的字也算命中），英文关键词不分大小写', () => {
+  const root = makeTagRoot()
+  const byTag = refGallery(root, 'costume', { q: '藏青' })
+  assert.equal(byTag.total, 1, '「藏青」只写在「标签」列里，cn 数组必须参与匹配')
+  assert.equal(byTag.items[0].id, 'SPR-0101')
+
+  assert.equal(refGallery(root, 'costume', { q: '条纹' }).total, 1, '名称与标签都命中时不算两条')
+  assert.equal(refGallery(root, 'costume', { q: '衬衫' }).total, 1, '名称照旧要能搜')
+  assert.equal(refGallery(root, 'costume', { q: 'striped knit' }).total, 1, '英文关键词小写查询')
+  assert.equal(refGallery(root, 'costume', { q: 'STRIPED' }).total, 1, '英文关键词大写查询不分大小写')
+  assert.equal(refGallery(root, 'costume', { q: '藏青 条纹' }).total, 0, '按子串匹配，不在这里做分词')
+})
+
+test('refImage 只认普通文件：软链不跟、目录不认，都回 no-ref-image', t => {
+  const root = makeRoot()
+  // 先测不依赖权限的那一半：同一个 id 位置上是个目录时，lstat 的 isFile() 不成立，必须跳过
+  fs.mkdirSync(path.join(root, NODE_REL, 'thumbs', 'costume', 'DIR-0001.webp'), { recursive: true })
+  assert.throws(() => refImage(root, 'costume', 'DIR-0001'), error => hasCode(error, 'no-ref-image'))
+  assert.throws(() => refImage(root, 'portrait', 'DIR-0001'), error => hasCode(error, 'no-ref-image'))
+
+  const outside = path.join(root, NODE_REL, 'outside-target.webp')
+  fs.writeFileSync(outside, 'outside-webp')
+  try {
+    fs.symlinkSync(outside, path.join(root, NODE_REL, 'thumbs', 'costume', 'LNK-0001.webp'), 'file')
+    fs.symlinkSync(outside, path.join(root, NODE_REL, 'img', 'costume', 'LNK-0001.webp'), 'file')
+  } catch (error) {
+    // Windows 上没开开发者模式 / 不是管理员时建不了软链（EPERM）：这半边跳过，别让用例变红
+    const why = error instanceof Error ? error.message : String(error)
+    t.diagnostic('这台机器建不了符号链接，软链那一半跳过：' + why)
+    return
+  }
+  // 缩略图与原图两个候选都是软链：跳过而不是跟随，最后按「没这张图」报错
+  assert.throws(() => refImage(root, 'costume', 'LNK-0001'), error => hasCode(error, 'no-ref-image'))
+  assert.throws(() => refImage(root, 'costume', 'LNK-0001', 'full'), error => hasCode(error, 'no-ref-image'))
+  // 普通文件不受影响
+  assert.equal(refImage(root, 'costume', 'SPR-0001').file, path.join(root, NODE_REL, 'thumbs', 'costume', 'SPR-0001.webp'))
+})
+
+test('两个 catalog 出现同一个 id：只算一次，先读到的目录赢', () => {
+  const root = fs.mkdtempSync(path.join(SANDBOX, 'dup-'))
+  const write = (dir, lines) => {
+    const at = path.join(root, NODE_REL, 'skills', dir, 'references')
+    fs.mkdirSync(at, { recursive: true })
+    fs.writeFileSync(path.join(at, 'catalog.csv'), lines.join('\n'))
+  }
+  write('costume-reference', [
+    'id,分类,服装名称,标签,英文关键词,图片',
+    'SPR-0501,春季穿搭,共用上衣,白色 上衣,white top,../../img/costume/SPR-0501.webp',
+    'SPR-0502,春季穿搭,另一件,灰色 上衣,grey top,../../img/costume/SPR-0502.webp',
+  ])
+  write('costume-reference-sexy', [
+    'id,分类,服装名称,标签,英文关键词,图片',
+    'SPR-0501,内衣・睡衣,重复的那条,黑色 内衣,black set,../../img/costume/SPR-0501.webp',
+  ])
+
+  const g = refGallery(root, 'costume')
+  assert.equal(g.total, 2, '重复 id 只能算一条')
+  assert.equal(g.shown, 2)
+  assert.equal(g.items.filter(item => item.id === 'SPR-0501').length, 1, 'items 里也只出现一次')
+  assert.equal(g.items.find(item => item.id === 'SPR-0501').name, '共用上衣', '先读到的目录赢')
+  assert.equal(g.sets.some(item => item.key === '内衣・睡衣'), false, '被去重的那条不再贡献分面')
+  assert.equal(refItem(root, 'costume', 'SPR-0501').name, '共用上衣', 'refItem 走 byId 也要拿到同一条')
+})
+
