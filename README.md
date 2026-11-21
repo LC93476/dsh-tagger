@@ -105,12 +105,16 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/<你>/AppData/Local/Programs/DeepSeek Harness/D
 | `/panel`（锻造台） | 白话 → tag：锻造、精修、投递、设置都在这儿 |
 | `/gallery`（姿势画廊） | 挑姿势拿该补的 tag，不做骨架控制 |
 
-## 三道本地后处理
+## 服装 / 人像参考库
 
-LLM 只负责「把话听懂」，剩下的规范化全在本地做，所以结果可复现、可体检：
+`/studio` 中栏四个页签：**姿势 / 服装 / 人像 / 样式**。前两个是「看着图挑词」的参考库，和姿势画廊一样只看图拿 tag，不跑 ControlNet：
 
-1. **规范对齐**（`lib/tags/`）：每条 tag 去词表核对，别名 / 大小写 / 下划线统一成 WD 权威写法，顺手理平权重与分组。
-2. **修复**（`lib/repair.js`）：词表里查不到的（拼错、自造、模型幻觉）按相近词与中文别名换掉；换不掉的标出来，不硬留。
+- **服装库**：成套穿搭（上装 / 下装 / 鞋袜 / 配饰），分普通与性感两批（`costume-reference`、`costume-reference-sexy`），合并成一个画廊；缩略图取节点根下的 `custom_nodes/ai-pose-gallery-zh/thumbs/costume/<id>.webp`（原图 `img/costume/<id>.webp`），点一张就把这套的 tag 追加到左栏提示词末尾。
+- **人像库**：按「分区 / 发长 / 发型」组织的真人像参考，只有原图 `custom_nodes/ai-pose-gallery-zh/img/portrait/<id>.webp`（没有缩略图，卡片直接 load 原图），用来按发长 / 脸型 / 表情挑词。
+- **数据源**：两个库都在 ComfyUI 里装的 `ai-pose-gallery-zh` 节点目录下（`custom_nodes/ai-pose-gallery-zh/skills/`），目录清单是各库的 `references/catalog.csv`；所以要先把 ComfyUI 目录（`comfy.launchDir`，设置页或 `settings.json`）配对。
+- **没装库不是故障**：库读不到时 `GET /refs` 回 404 `no-ref-library`、`/ref-image` 与 `/ref-tags` 一并 404，页签显示「没读到参考库」空态，锻造、出图、姿势画廊照常。
+- **只认本地文件**：二次元服装库（`costume-reference-anime`）的图挂在远端 URL 上，本仓库不支持 —— 留着它就得联网，也会让页面出现外链。这里保证断网可用、页内零外链。
+
 3. **中文意图映射**（`lib/zh-intent.js`）：白话里的「回头」「跪趴」「半脱」这类说法先映射成候选 tag，兜住模型漏掉的构图与体位。
 4. **词序与质量词**（`lib/postprocess/`）：去重、上位词降权，再按 14 段排词序 —— 质量词 → 主体 → 角色 → 发型/瞳色 → 体型 → 表情 → 姿势 → 肢体 → 服装 → 性细节 → 镜头 → 场景 → 光照 → 其它；镜头段内「视角 → 景别 → 构图」，发型段内「长度 → 造型 → 颜色 → 瞳色」。
 

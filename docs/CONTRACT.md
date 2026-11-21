@@ -37,6 +37,8 @@ HTTP/MCP 的逐条参数与示例不在这里，看 [`API.md`](./API.md)。
 | `lib/poses.js` | 姿势目录、缩略图与画廊分组（`createPoseCatalog` / `poseImage` / `poseGallery`） |
 | `lib/pose-tags.js` | 姿势 → tag 的纯映射表：`ANGLE_TAGS` / `CATEGORY_TAGS` / `NAME_HINTS` / `SET_TAGS` + `tagsForPose`（不读盘、不查词表，映射表里的词都在 `data/danbooru` 核对过） |
 | `lib/styles.js` | 参考样式预设（`/studio` 中栏）：`STYLE_GROUPS`（五个分组）/ `STYLES`（卡片 `{ id, title, group, accent, note, tags }`）/ `listStyles` / `styleById` / `tagsOfStyles` / `mergeStylePrompt`。纯数据 + 纯函数，零依赖无 IO；每个 tag 都在 `data/danbooru` 核对过，只放画风 / 光感 / 构图词（要能进公开版） |
+| `lib/refs.js` | 服装 / 人像两个只读参考库（`/studio` 中栏的服装、人像页签）：`REF_KINDS`（两个库的目录布局与 MIME）/ `refRoot` / `refKind` / `refGallery`（分面 + 过滤 + 分页）/ `refItem`（单条）/ `refImage`（出图，抛 `RefError`）/ `resetRefCache`。读 `ai-pose-gallery-zh` 的 `skills/<库>/references/catalog.csv`，缓存键是「文件 + mtimeMs + size」，换库不用重启 |
+| `lib/ref-tags.js` | 参考图 → tag 的纯映射：`tagsForCostume(item)` / `tagsForPortrait(item)` → `{ positive, negative, notes, reasons }`；handlers 只调这两个函数，映射抛错时按空映射处理 |
 | `server/standalone.mjs` | 独立 HTTP 服务入口（web 版）：起进程、挂 `/tagger/api` 路由、托管 `/public` |
 | `server/shims.mjs` | **纯 Cordis 生命周期垫片**：`createContext` + 8 个传输层名字再导出，≤12KB（有测试护栏） |
 | `lib/cordis/host.js` | 独立模式的 ctx 装配与织入：llm / webServer / tools 三个传输层的实现正文 |
@@ -187,6 +189,35 @@ handler 侧只做三件事：`groups` 原样全出；`styles` 按 `group`（小�
 `GET /studio` 是纯静态 HTML 页面：`server/standalone.mjs` 里 `registerHtmlPage("/studio", studioHtml)`，每次读盘、
 `no-store`、只认 GET/HEAD（否则 405 `method-not-allowed`），读不到 `server/public/studio.html` 就退回信息页。
 它不在 `/tagger/api` 下，也不经过 `lib/routes.js`。
+
+### 参考库（`lib/refs.js` + `lib/ref-tags.js`）
+
+`GET /refs`、`GET /ref-image`、`GET /ref-tags` 三个都只读，只用一个配置：`config.comfy.launchDir`（与姿势库同源，
+所以根目录算法和 `lib/poses.js` 一致：`<launchDir>/custom_nodes/ai-pose-gallery-zh`）。库不在盘上不是故障。
+
+```js
+REF_KINDS   // costume: sets [costume-reference, costume-reference-sexy]，thumb: thumbs/costume，image: img/costume
+            // portrait: sets [portrait-reference]，thumb: ''，image: img/portrait
+            // 口径：catalog.csv 在 <节点根>/skills/<set.dir>/references/，而 thumb/image 是**相对节点根**的目录
+            //      （<节点根> = <launchDir>/custom_nodes/ai-pose-gallery-zh），两处不同层，别把图放到 skills/ 下
+            // 两个库的 mediaType 都是 image/webp
+refGallery(launchDir, kind, { q, set, hair, popular, limit, offset })
+            // -> { ok, kind, total, shown, offset, sets, categories, hairs, items }
+            // 库读不到 -> { ok: false, error: 'no-ref-library', ...完整空壳 }
+refItem(launchDir, kind, id)      // -> 条目 | null（id 过 /^[A-Za-z0-9_-]{1,40}$/）
+refImage(launchDir, kind, id, size)
+            // -> { file, mediaType } | 抛 RefError('bad-kind'|'bad-id'|'no-ref-library'|'no-ref-image')
+resetRefCache()                   // 测试与手动 reload 用；库里换了文件本来就会按 mtime+size 重读
+```
+
+handler 侧的固定口径：`kind` 走 `refKind()` 归一（只认 `costume` / `portrait`，认不出 400 `bad-kind`）；
+`limit` 默认 120、上限 400，`offset` ≤ 0 当 0；`RefError.code` 直接映射成 400 / 404 的 `{ ok: false, error }`；
+`/ref-image` 是 GET/HEAD 的二进制响应（`Content-Type` 取 `REF_KINDS[kind].mediaType`），索引里有、盘上被删也回 404 而不是 500。
+
+`/ref-tags` 只做「映射 + 词表校对」：`lib/ref-tags.js` 的 `tagsForCostume` / `tagsForPortrait` 给
+`{ positive, negative, notes, reasons }`，handler 再用 `canonicalizeMany` 给每条 tag 补 `cn`（对不上是空串）。
+模块缺席回 501 `ref-tags-unavailable`；映射函数自己抛错时按空映射处理，不把请求变成 500。
+
 ## 5. 二次精修契约（`lib/refine.js`）
 
 ```js

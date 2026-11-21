@@ -22,6 +22,11 @@ const state = {
   ui: { maxTags: 40, level: 'full', solo: false, profile: 'tag', workflowId: '' },
   poses: { groups: [], sets: [], categories: [], angles: [], total: 0, set: 'all', category: '', angle: '', q: '', offset: 0, picked: {}, loading: false },
   styles: { ok: false, message: '', styles: [], groups: [], selected: new Set(), filter: '' },
+  refs: {
+    costume: { items: [], total: 0, offset: 0, sets: [], categories: [], hairs: [], q: '', set: '', hair: '', popular: false, loading: false, tried: false, ok: false, message: '' },
+    portrait: { items: [], total: 0, offset: 0, sets: [], categories: [], hairs: [], q: '', set: 'all', hair: '', popular: false, loading: false, tried: false, ok: false, message: '' },
+  },
+  dock: { kind: '', id: '', name: '', meta: '', thumb: '', tags: [], note: '' },
   forge: { running: false, positive: '', negative: '', cn: {}, ms: 0, error: '', warning: '' },
   run: { running: false, promptId: '', stage: 'idle', progress: 0, images: [], message: '', timer: 0 },
   history: [],
@@ -31,6 +36,14 @@ const state = {
 /* ---------------- 小工具 ---------------- */
 
 function textOf(value) { return typeof value === 'string' ? value.trim() : '' }
+
+// 参考库接口回的图是根相对路径（/ref-image?kind=…），要补上 API 前缀才打得开。
+function refSrc(value) {
+  const src = textOf(value)
+  if (src === '' || src.indexOf(API + '/') === 0) return src
+  if (src.charAt(0) === '/') return API + src
+  return src
+}
 
 function intOf(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value), 10)
@@ -351,14 +364,24 @@ async function doForge() {
 
 /* ---------------- 中栏：页签 ---------------- */
 
+const TABS = ['pose', 'costume', 'portrait', 'style']
+
 function showTab(which) {
-  const poseOn = which !== 'style'
-  $('tab-pose').classList.toggle('is-on', poseOn)
-  $('tab-pose').setAttribute('aria-selected', poseOn ? 'true' : 'false')
-  $('tab-style').classList.toggle('is-on', !poseOn)
-  $('tab-style').setAttribute('aria-selected', poseOn ? 'false' : 'true')
-  $('panel-pose').hidden = !poseOn
-  $('panel-style').hidden = poseOn
+  const id = TABS.indexOf(which) >= 0 ? which : 'pose'
+  TABS.forEach(function (key) {
+    const on = key === id
+    const tab = $('tab-' + key)
+    const panel = $('panel-' + key)
+    if (tab !== null) {
+      tab.classList.toggle('is-on', on)
+      tab.setAttribute('aria-selected', on ? 'true' : 'false')
+    }
+    if (panel !== null) panel.hidden = !on
+  })
+  // 切页签就把 dock 收掉：它记的是上一页签选中的那条参考，留着会串台（服装卡出现在人像页签下）
+  if (state.dock.kind !== '' && state.dock.kind !== id) closeDock()
+  // 参考库按需加载：不在启动时把 1400+ 条一起拉下来
+  if ((id === 'costume' || id === 'portrait') && state.refs[id].tried !== true) loadRefs(id, true)
 }
 
 /* ---------------- 中栏：姿势 ---------------- */
@@ -537,6 +560,371 @@ async function pickPose(base, card) {
     if (badge !== null) badge.textContent = String(state.poses.picked[base])
   }
   flash('已追加 ' + list.length + ' 个 tag')
+}
+
+/* ---------------- 中栏：服装 / 人像 ---------------- */
+
+const REF_PAGE = 36
+const REF_LABELS = { costume: '服装', portrait: '人像' }
+const REF_EMPTY = {
+  costume: ['没有匹配的服装。', '换个关键词，或点「全部分类」看回来。'],
+  portrait: ['没有匹配的人像。', '换个关键词，或把筛选放宽一点。'],
+}
+const REF_FAIL_HINT = '参考库接口还没就绪时这里会留空；素材目录也要在 ComfyUI 的安装目录里。'
+const REF_FAIL_TEXT = '参考库暂时用不了'
+
+function refFailText(message) {
+  const text = textOf(message)
+  if (text === '' || text.indexOf('/') >= 0 || /^network$/i.test(text)) return REF_FAIL_TEXT
+  return text
+}
+
+function refGridBox(kind) {
+  return $(kind === 'costume' ? 'ref-costume-grid' : 'ref-portrait-grid')
+}
+
+function refCountBox(kind) {
+  return $('tab-' + kind + '-count')
+}
+
+function setRefEmpty(kind, line, hint) {
+  const head = $(kind + '-empty-line')
+  const tail = $(kind + '-empty-hint')
+  if (head !== null) head.textContent = line
+  if (tail !== null) {
+    tail.textContent = hint
+    tail.hidden = hint === ''
+  }
+  const empty = $(kind + '-empty')
+  if (empty !== null) empty.hidden = false
+  const more = $(kind + '-more')
+  if (more !== null) more.hidden = true
+}
+
+function resetRefEmpty(kind) {
+  setRefEmpty(kind, REF_EMPTY[kind][0], REF_EMPTY[kind][1])
+}
+
+function paintRefCount(kind, total) {
+  const box = refCountBox(kind)
+  if (box === null) return
+  const show = Number.isFinite(total) && total > 0
+  box.textContent = show ? String(total) : ''
+  box.hidden = !show
+}
+
+function renderCostumeCats() {
+  const box = $('costume-cats')
+  if (box === null) return
+  clear(box)
+  const ref = state.refs.costume
+  box.append(el('button', {
+    class: 'pill-i' + (ref.set === '' ? ' is-on' : ''),
+    type: 'button',
+    dataset: { set: '' },
+    text: '全部分类',
+  }))
+  const list = Array.isArray(ref.categories) ? ref.categories : []
+  list.forEach(function (item) {
+    const key = textOf(item.key)
+    if (key === '') return
+    box.append(el('button', {
+      class: 'pill-i' + (key === ref.set ? ' is-on' : ''),
+      type: 'button',
+      dataset: { set: key },
+      text: key + ' ' + (Number.isFinite(item.count) ? item.count : ''),
+    }))
+  })
+}
+
+function renderPortraitSets() {
+  const box = $('portrait-sets')
+  if (box === null) return
+  clear(box)
+  const ref = state.refs.portrait
+  const list = Array.isArray(ref.sets) ? ref.sets : []
+  if (list.length === 0) {
+    box.append(el('button', {
+      class: 'seg-i is-on',
+      type: 'button',
+      role: 'tab',
+      dataset: { set: 'all' },
+      text: '全部',
+    }))
+    return
+  }
+  list.forEach(function (item) {
+    const key = textOf(item.key) || 'all'
+    const button = el('button', {
+      class: 'seg-i' + (key === ref.set ? ' is-on' : ''),
+      type: 'button',
+      role: 'tab',
+      dataset: { set: key },
+      text: (textOf(item.label) || key) + ' ' + (Number.isFinite(item.count) ? item.count : ''),
+    })
+    button.setAttribute('aria-selected', key === ref.set ? 'true' : 'false')
+    box.append(button)
+  })
+}
+
+function renderPortraitHairs() {
+  const box = $('portrait-hairs')
+  if (box === null) return
+  clear(box)
+  const ref = state.refs.portrait
+  box.append(el('button', {
+    class: 'pill-i' + (ref.hair === '' ? ' is-on' : ''),
+    type: 'button',
+    dataset: { hair: '' },
+    text: '全部发型',
+  }))
+  const list = Array.isArray(ref.hairs) ? ref.hairs : []
+  list.forEach(function (item) {
+    const key = textOf(item.key)
+    if (key === '') return
+    box.append(el('button', {
+      class: 'pill-i' + (key === ref.hair ? ' is-on' : ''),
+      type: 'button',
+      dataset: { hair: key },
+      text: key + ' ' + (Number.isFinite(item.count) ? item.count : ''),
+    }))
+  })
+}
+
+function paintPopular() {
+  const button = $('portrait-popular')
+  if (button === null) return
+  const on = state.refs.portrait.popular === true
+  button.classList.toggle('is-on', on)
+  button.setAttribute('aria-pressed', on ? 'true' : 'false')
+}
+
+function refCard(kind, item) {
+  const isCostume = kind === 'costume'
+  const id = textOf(item.id)
+  const title = isCostume ? (textOf(item.name) || id) : (textOf(item.title) || id)
+  const corner = isCostume ? textOf(item.category) : textOf(item.hair)
+  const meta = isCostume
+    ? [id, textOf(item.keywords)].filter(function (part) { return part !== '' }).join(' · ')
+    : [textOf(item.partition), textOf(item.style)].filter(function (part) { return part !== '' }).join(' · ')
+  const src = refSrc(isCostume ? item.thumb : item.image)
+  const card = el('button', {
+    class: 'gcard rcard' + (isCostume ? '' : ' rcard-portrait'),
+    type: 'button',
+    dataset: { refKind: kind, refId: id, picked: '0' },
+    'aria-label': '把「' + title + '」的 tag 加到提示词',
+  })
+  const thumb = el('div', { class: 'gcard-thumb', dataset: { tone: kind } })
+  if (src !== '') {
+    thumb.append(el('img', {
+      src: src,
+      alt: '',
+      loading: 'lazy',
+      draggable: 'false',
+      referrerpolicy: 'no-referrer',
+    }))
+  }
+  if (corner !== '') thumb.append(el('span', { class: 'rcard-tag', text: corner }))
+  if (kind === 'portrait' && item.popular === true) thumb.append(el('span', { class: 'rcard-hot', text: '热门' }))
+  thumb.append(el('span', { class: 'gcard-badge', text: '' }))
+  card.append(thumb)
+  card.append(el('div', { class: 'gcard-name' + (isCostume ? '' : ' rcard-name-one'), text: title }))
+  card.append(el('div', { class: 'gcard-meta', text: meta }))
+  return card
+}
+
+function renderRefGrid(kind, append) {
+  const box = refGridBox(kind)
+  if (box === null) return
+  if (append !== true) clear(box)
+  const ref = state.refs[kind]
+  ref.items.forEach(function (item) { box.append(refCard(kind, item)) })
+  const empty = $(kind + '-empty')
+  if (empty !== null) {
+    if (ref.items.length > 0) empty.hidden = true
+    else resetRefEmpty(kind)
+  }
+  const more = $(kind + '-more')
+  if (more !== null) more.hidden = !(Number.isFinite(ref.total) && ref.offset < ref.total)
+  paintRefCount(kind, ref.total)
+}
+
+function refFail(kind, message) {
+  const ref = state.refs[kind]
+  ref.items = []
+  ref.total = 0
+  ref.offset = 0
+  const box = refGridBox(kind)
+  if (box !== null) clear(box)
+  setRefEmpty(kind, message === '' ? '参考库加载失败' : message, REF_FAIL_HINT)
+  paintRefCount(kind, 0)
+}
+
+async function loadRefs(kind, reset) {
+  const ref = state.refs[kind]
+  if (ref.loading) return
+  ref.loading = true
+  const offset = reset === true ? 0 : ref.offset
+  const params = new URLSearchParams()
+  params.set('kind', kind)
+  if (ref.q !== '') params.set('q', ref.q)
+  if (ref.set !== '' && ref.set !== 'all') params.set('set', ref.set)
+  if (kind === 'portrait' && ref.hair !== '') params.set('hair', ref.hair)
+  if (kind === 'portrait' && ref.popular === true) params.set('popular', '1')
+  params.set('limit', String(REF_PAGE))
+  params.set('offset', String(offset))
+  const res = await api('/refs?' + params.toString())
+  ref.loading = false
+  ref.tried = true
+  const data = res.data || {}
+  if (res.status === 0 || data.ok === false || !Array.isArray(data.items)) {
+    ref.ok = false
+    ref.message = textOf(data.message)
+    refFail(kind, refFailText(ref.message))
+    return
+  }
+  ref.ok = true
+  ref.message = ''
+  ref.sets = Array.isArray(data.sets) ? data.sets : ref.sets
+  ref.categories = Array.isArray(data.categories) ? data.categories : []
+  ref.hairs = Array.isArray(data.hairs) ? data.hairs : []
+  ref.total = Number.isFinite(data.total) ? data.total : 0
+  ref.items = reset === true ? data.items : ref.items.concat(data.items)
+  ref.offset = offset + data.items.length
+  if (kind === 'costume') renderCostumeCats()
+  else {
+    if (ref.set === '') ref.set = 'all'
+    renderPortraitSets()
+    renderPortraitHairs()
+    paintPopular()
+  }
+  renderRefGrid(kind, reset !== true)
+}
+
+function dockEmpty() {
+  return { kind: '', id: '', name: '', meta: '', thumb: '', tags: [], note: '' }
+}
+
+function renderDock() {
+  const dock = $('ref-dock')
+  if (dock === null) return
+  const data = state.dock
+  const thumb = $('ref-dock-thumb')
+  if (thumb !== null) {
+    if (data.thumb !== '') thumb.src = data.thumb
+    else thumb.removeAttribute('src')
+    thumb.hidden = data.thumb === ''
+  }
+  const name = $('ref-dock-name')
+  if (name !== null) name.textContent = data.name
+  const meta = $('ref-dock-meta')
+  if (meta !== null) meta.textContent = data.meta
+  const box = $('ref-dock-tags')
+  if (box !== null) {
+    clear(box)
+    data.tags.forEach(function (item, index) {
+      box.append(el('button', {
+        class: 'rdock-tag',
+        type: 'button',
+        dataset: { index: String(index) },
+        title: '点掉这个 tag',
+        text: item.tag + (item.cn !== '' ? ' ' + item.cn : ''),
+      }))
+    })
+  }
+  const note = $('ref-dock-note')
+  if (note !== null) {
+    note.textContent = data.note
+    note.hidden = data.note === ''
+  }
+  const has = data.tags.length > 0
+  const copy = $('ref-dock-copy')
+  if (copy !== null) copy.disabled = !has
+  const fill = $('ref-dock-fill')
+  if (fill !== null) fill.disabled = !has
+}
+
+function openDock(kind, item) {
+  const isCostume = kind === 'costume'
+  state.dock = {
+    kind: kind,
+    id: textOf(item.id),
+    name: isCostume ? (textOf(item.name) || textOf(item.id)) : (textOf(item.title) || textOf(item.id)),
+    meta: isCostume
+      ? [textOf(item.category), textOf(item.id)].filter(function (part) { return part !== '' }).join(' · ')
+      : [textOf(item.partition), textOf(item.hair), textOf(item.style)].filter(function (part) { return part !== '' }).join(' · '),
+    thumb: refSrc(isCostume ? item.thumb : item.image),
+    tags: [],
+    note: '',
+  }
+  const dock = $('ref-dock')
+  if (dock !== null) dock.hidden = false
+  renderDock()
+}
+
+function dockTagText() {
+  return state.dock.tags.map(function (item) { return item.tag }).join(', ')
+}
+
+function fillDockTags() {
+  if (state.dock.tags.length === 0) { flash('这个参考还没有可用的 tag'); return }
+  appendToPrompt(dockTagText())
+  flash('已追加 ' + state.dock.tags.length + ' 个 tag')
+}
+
+function closeDock() {
+  state.dock = dockEmpty()
+  const dock = $('ref-dock')
+  if (dock !== null) dock.hidden = true
+}
+
+async function pickRef(kind, id) {
+  const ref = state.refs[kind]
+  const item = ref.items.find(function (entry) { return textOf(entry.id) === id })
+  if (item === undefined) return
+  openDock(kind, item)
+  const params = new URLSearchParams()
+  params.set('kind', kind)
+  params.set('id', id)
+  const res = await api('/ref-tags?' + params.toString())
+  if (state.dock.kind !== kind || state.dock.id !== id) return
+  const data = res.data || {}
+  if (res.status === 0 || data.ok === false) {
+    state.dock.tags = []
+    state.dock.note = res.status === 501
+      ? '标签接口还没上线，可以先照名称手动补。'
+      : (textOf(data.message) || '取不到这个参考的 tag')
+    renderDock()
+    return
+  }
+  const packTags = function (list) {
+    const seen = {}
+    return (Array.isArray(list) ? list : [])
+      .map(function (entry) { return { tag: tagName(entry), cn: tagCn(entry) } })
+      .filter(function (entry) {
+        if (entry.tag === '' || seen[entry.tag] === true) return false
+        seen[entry.tag] = true
+        return true
+      })
+  }
+  // 现接口回 positive / negative（docs/API.md:284-292），早先约定的是 tags，两种都认。
+  const tags = packTags(Array.isArray(data.positive) ? data.positive : data.tags)
+  const negative = packTags(data.negative)
+  state.dock.tags = tags
+  if (tags.length === 0) state.dock.note = '这个参考没有映射到 tag，可以照名称手动补。'
+  else if (negative.length > 0) {
+    state.dock.note = '还会补上负向：' + negative.map(function (entry) { return entry.tag }).join(', ')
+  } else state.dock.note = ''
+  renderDock()
+  if (tags.length === 0) return
+  const box = refGridBox(kind)
+  if (box === null) return
+  box.querySelectorAll('.rcard').forEach(function (card) {
+    if (card.dataset.refId !== id) return
+    card.dataset.picked = '1'
+    const badge = card.querySelector('.gcard-badge')
+    if (badge !== null) badge.textContent = '✓'
+  })
 }
 
 /* ---------------- 中栏：样式 ---------------- */
@@ -1372,6 +1760,73 @@ function bindEvents() {
     pickPose(card.dataset.base, card)
   })
 
+  $('tab-costume').addEventListener('click', function () { showTab('costume') })
+  $('tab-portrait').addEventListener('click', function () { showTab('portrait') })
+
+  const refTimer = { costume: 0, portrait: 0 }
+  ;[['costume', 'costume-q'], ['portrait', 'portrait-q']].forEach(function (pair) {
+    const kind = pair[0]
+    const box = $(pair[1])
+    if (box === null) return
+    box.addEventListener('input', function () {
+      if (refTimer[kind] !== 0) window.clearTimeout(refTimer[kind])
+      refTimer[kind] = window.setTimeout(function () {
+        state.refs[kind].q = box.value.trim()
+        loadRefs(kind, true)
+      }, 250)
+    })
+  })
+
+  $('costume-cats').addEventListener('click', function (event) {
+    const hit = event.target.closest('[data-set]')
+    if (hit === null) return
+    state.refs.costume.set = hit.dataset.set
+    loadRefs('costume', true)
+  })
+  $('portrait-sets').addEventListener('click', function (event) {
+    const hit = event.target.closest('[data-set]')
+    if (hit === null) return
+    state.refs.portrait.set = hit.dataset.set
+    loadRefs('portrait', true)
+  })
+  $('portrait-hairs').addEventListener('click', function (event) {
+    const hit = event.target.closest('[data-hair]')
+    if (hit === null) return
+    state.refs.portrait.hair = hit.dataset.hair
+    loadRefs('portrait', true)
+  })
+  $('portrait-popular').addEventListener('click', function () {
+    state.refs.portrait.popular = state.refs.portrait.popular !== true
+    paintPopular()
+    loadRefs('portrait', true)
+  })
+  $('costume-more').addEventListener('click', function () { loadRefs('costume', false) })
+  $('portrait-more').addEventListener('click', function () { loadRefs('portrait', false) })
+  $('ref-costume-grid').addEventListener('click', function (event) {
+    const card = event.target.closest('.rcard')
+    if (card === null) return
+    pickRef('costume', card.dataset.refId)
+  })
+  $('ref-portrait-grid').addEventListener('click', function (event) {
+    const card = event.target.closest('.rcard')
+    if (card === null) return
+    pickRef('portrait', card.dataset.refId)
+  })
+  $('ref-dock-copy').addEventListener('click', function () {
+    if (state.dock.tags.length === 0) return
+    copyText(dockTagText(), (REF_LABELS[state.dock.kind] || '参考') + ' tag')
+  })
+  $('ref-dock-fill').addEventListener('click', function () { fillDockTags() })
+  $('ref-dock-clear').addEventListener('click', function () { closeDock() })
+  $('ref-dock-tags').addEventListener('click', function (event) {
+    const chip = event.target.closest('[data-index]')
+    if (chip === null) return
+    const index = Number(chip.dataset.index)
+    if (!Number.isFinite(index)) return
+    state.dock.tags.splice(index, 1)
+    renderDock()
+  })
+
   $('style-groups').addEventListener('click', function (event) {
     const card = event.target.closest('.scard')
     if (card === null) return
@@ -1422,6 +1877,7 @@ function bindEvents() {
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return
     if (settingsOpen()) { closeSettings(); return }
+    if ($('ref-dock') !== null && $('ref-dock').hidden === false) { closeDock(); return }
     closeLightbox()
   })
 }

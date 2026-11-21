@@ -952,3 +952,59 @@ test('三栏工作台：/studio 走白名单路由，骨架只引用本地样式
   }
 })
 
+test('三栏工作台：服装 / 人像参考库页签、底部 dock 与只读接口都在位', async () => {
+  const html = readFileSync(path.join(here, '..', 'server', 'public', 'studio.html'), 'utf8')
+  const js = readFileSync(path.join(here, '..', 'server', 'public', 'studio.js'), 'utf8')
+  const css = readFileSync(path.join(here, '..', 'server', 'public', 'studio.css'), 'utf8')
+
+  const order = ['tab-pose', 'tab-costume', 'tab-portrait', 'tab-style'].map(id => html.indexOf('id="' + id + '"'))
+  assert.ok(order.every(index => index > 0), '页签要有 ' + order.join(','))
+  assert.deepEqual(order.slice().sort((a, b) => a - b), order, '页签顺序要是 姿势 → 服装 → 人像 → 样式')
+
+  const ids = [
+    'tab-costume-count', 'tab-portrait-count',
+    'panel-costume', 'costume-q', 'costume-cats', 'ref-costume-grid', 'costume-empty', 'costume-empty-line', 'costume-more',
+    'panel-portrait', 'portrait-q', 'portrait-sets', 'portrait-hairs', 'portrait-popular', 'ref-portrait-grid', 'portrait-empty', 'portrait-more',
+    'ref-dock', 'ref-dock-thumb', 'ref-dock-name', 'ref-dock-meta', 'ref-dock-tags', 'ref-dock-note',
+    'ref-dock-copy', 'ref-dock-fill', 'ref-dock-clear',
+  ]
+  for (const id of ids) assert.ok(html.includes('id="' + id + '"'), '参考库要有 #' + id)
+  for (const id of ['costume', 'portrait']) {
+    assert.ok(html.includes('aria-controls="panel-' + id + '"'), 'tab-' + id + ' 要指向 panel-' + id)
+  }
+  assert.ok(html.includes('aria-label="服装分类"'), '服装面板要留筛选槽位')
+  assert.ok(html.includes('id="portrait-popular"') && html.includes('aria-pressed="false"'), '「只看热门」要是可切换按钮')
+  assert.ok(/id="ref-dock"[^>]*hidden/.test(html), 'dock 默认收起')
+
+  assert.ok(js.includes("const TABS = ['pose', 'costume', 'portrait', 'style']"), 'showTab 要认四页签')
+  for (const p of ["'/refs?'", "'/ref-tags?'", 'loadRefs', 'pickRef', 'renderRefGrid', 'openDock', 'closeDock', 'fillDockTags']) {
+    assert.ok(js.includes(p), 'studio.js 要有 ' + p)
+  }
+  assert.ok(js.includes('REF_PAGE'), '分页要有页长常量')
+  assert.ok(js.includes('标签接口还没上线'), '标签接口 501 时要给降级文案')
+  assert.ok(js.includes("loading: 'lazy'"), '缩略图要懒加载')
+  assert.ok(js.includes("referrerpolicy: 'no-referrer'"), '图片不带来源')
+  assert.ok(js.includes("showTab('costume')") && js.includes("showTab('portrait')"), '页签点击要切面板')
+  assert.ok(js.includes('function refSrc'), '参考图路径要过 refSrc 补 API 前缀')
+  assert.ok((js.match(/refSrc\(/g) ?? []).length >= 3, 'refSrc 要用在卡片与 dock 缩略图上')
+  assert.ok(js.includes('Array.isArray(data.positive)'), '/ref-tags 要按 positive / negative 取值')
+
+  for (const rule of ['.ref-grid', '.ref-grid-portrait', '.rcard-name-one', '.rcard-tag', '.rcard-hot', '.rdock', '.rdock-tag', '.tab-count']) {
+    assert.ok(css.includes(rule), 'studio.css 要有 ' + rule)
+  }
+  assert.ok(css.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), '服装卡四列')
+  assert.ok(css.includes('grid-template-columns: repeat(3, minmax(0, 1fr))'), '人像卡三列起步')
+  assert.ok(css.includes('.rcard .gcard-badge { right: auto; left: 5px; }'), '选中角标要让开右上「热门」')
+  assert.ok(css.includes('.rcard .gcard-meta'), '卡片 meta 要截断，别把网格撑歪')
+  assert.equal(css.includes('http://') || css.includes('https://'), false, '样式表不许引外部字体')
+  const remote = html.match(/(?:src|href)\s*=\s*"[^"]*https?:\/\//gi) ?? []
+  assert.equal(remote.length, 0, '参考库不许引外部资源：' + remote.join(' '))
+
+  for (const id of ['panel-pose', 'panel-style', 'pose-grid', 'style-groups', 'settings', 'btn-settings']) {
+    assert.ok(html.includes('id="' + id + '"'), '不许弄丢 #' + id)
+  }
+  for (const p of ['/pose-gallery?', '/pose-tags?', '/styles', '/forge', '/run']) {
+    assert.ok(js.includes(p), '不许弄丢 ' + p)
+  }
+})
+

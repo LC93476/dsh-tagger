@@ -78,6 +78,8 @@
       <h1 id="h-ref">参考样式</h1>
       <div class="tabs" role="tablist" aria-label="参考类型">
         <button class="tab is-on" id="tab-pose" type="button" role="tab" aria-selected="true" aria-controls="panel-pose">姿势</button>
+        <button class="tab" id="tab-costume" type="button" role="tab" aria-selected="false" aria-controls="panel-costume">服装<span class="tab-count" id="tab-costume-count" hidden></span></button>
+        <button class="tab" id="tab-portrait" type="button" role="tab" aria-selected="false" aria-controls="panel-portrait">人像<span class="tab-count" id="tab-portrait-count" hidden></span></button>
         <button class="tab" id="tab-style" type="button" role="tab" aria-selected="false" aria-controls="panel-style">样式</button>
       </div>
     </div>
@@ -100,12 +102,65 @@
       <div class="more"><button class="mini" id="pose-more" type="button" hidden>加载更多</button></div>
     </div>
 
+    <div class="panel" id="panel-costume" role="tabpanel" aria-labelledby="tab-costume" hidden>
+      <div class="searchbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.4 15.4 21 21"></path></svg>
+          <input id="costume-q" type="search" placeholder="搜服装名称、编号（SPR-0001）、关键词" autocomplete="off" spellcheck="false" aria-label="搜索服装">
+        </label>
+      </div>
+      <div class="pills" id="costume-cats" aria-label="服装分类"></div>
+      <div class="ref-grid" id="ref-costume-grid"></div>
+      <div class="empty" id="costume-empty" hidden>
+        <p id="costume-empty-line">没有匹配的服装。</p>
+        <p class="dim" id="costume-empty-hint">换个关键词，或点「全部分类」看回来。</p>
+      </div>
+      <div class="more"><button class="mini" id="costume-more" type="button" hidden>加载更多</button></div>
+    </div>
+
+    <div class="panel" id="panel-portrait" role="tabpanel" aria-labelledby="tab-portrait" hidden>
+      <div class="searchbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.4 15.4 21 21"></path></svg>
+          <input id="portrait-q" type="search" placeholder="搜标题、发型、编号" autocomplete="off" spellcheck="false" aria-label="搜索人像">
+        </label>
+      </div>
+      <div class="seg" id="portrait-sets" role="tablist" aria-label="分区"></div>
+      <div class="pills" id="portrait-hairs" aria-label="发长"></div>
+      <div class="pills" id="portrait-flags" aria-label="人像筛选">
+        <button class="pill-i" id="portrait-popular" type="button" aria-pressed="false">只看热门</button>
+      </div>
+      <div class="ref-grid ref-grid-portrait" id="ref-portrait-grid"></div>
+      <div class="empty" id="portrait-empty" hidden>
+        <p id="portrait-empty-line">没有匹配的人像。</p>
+        <p class="dim" id="portrait-empty-hint">换个关键词，或把筛选放宽一点。</p>
+      </div>
+      <div class="more"><button class="mini" id="portrait-more" type="button" hidden>加载更多</button></div>
+    </div>
+
     <div class="panel" id="panel-style" role="tabpanel" aria-labelledby="tab-style" hidden>
       <div class="style-groups" id="style-groups"></div>
       <p class="dim" id="style-status">样式库加载中…</p>
       <div class="row sticky-row">
         <button class="btn" id="style-apply" type="button" disabled>套用所选样式到提示词</button>
         <span class="dim" id="style-picked">已选 0</span>
+      </div>
+    </div>
+
+    <div class="rdock" id="ref-dock" hidden>
+      <img class="rdock-thumb" id="ref-dock-thumb" alt="" loading="lazy" referrerpolicy="no-referrer">
+      <div class="rdock-body">
+        <div class="rdock-head">
+          <span class="rdock-name" id="ref-dock-name"></span>
+          <span class="rdock-meta dim" id="ref-dock-meta"></span>
+        </div>
+        <div class="rdock-tags" id="ref-dock-tags"></div>
+        <p class="rdock-note" id="ref-dock-note" hidden></p>
+      </div>
+      <div class="rdock-acts">
+        <button class="mini" id="ref-dock-copy" type="button">复制 tag</button>
+        <button class="mini" id="ref-dock-fill" type="button">填入提示词</button>
+        <button class="mini" id="ref-dock-clear" type="button">清空</button>
       </div>
     </div>
   </section>
