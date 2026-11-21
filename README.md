@@ -85,9 +85,25 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/<你>/AppData/Local/Programs/DeepSeek Harness/D
 - **入口**：浏览器打开 `/gallery`（`http://127.0.0.1:7789/gallery`），或点面板「出图」卡右上角的「姿势画廊 ↗」（新标签页打开）。
 - **数据源**：ComfyUI 里装的 `ai-pose-gallery-zh` 自制节点 —— 读它的 `custom_nodes/ai-pose-gallery-zh/skills/pose-reference-*/references/catalog.csv`，缩略图取 `img/thumbs/`。所以得先把 ComfyUI 目录（`comfy.launchDir`，设置页或 `settings.json`）配对，否则画廊是空的，页面会提示「没读到姿势库」。
 
-  「填入面板」走浏览器本地存储：把当前这几个 tag 写进 `localStorage` 的 `dsh-tagger:pending-prompt`，然后跳回 `/`；锻造台启动时读一次就删除，填进输入框并聚焦 —— 所以它只会覆盖这一次，不会在下次开面板时把你手写的内容盖掉。
+  「填入面板」走浏览器本地存储：把当前这几个 tag 写进 `localStorage` 的 `dsh-tagger:pending-prompt`，然后跳回 `/panel`；锻造台启动时读一次就删除，填进输入框并聚焦 —— 所以它只会覆盖这一次，不会在下次开面板时把你手写的内容盖掉。
 
   画廊只回答「这个姿势该带哪些词」，不做骨架控制。真要锁姿势还是走 ControlNet 那套模板（见 `docs/API.md` 里姿势类模板的两个专属变量）。
+
+## 三栏工作台
+
+`/studio` 是把「写提示词 → 挑样式 → 出图」摆在一屏里的工作台，三个竖栏从左到右：
+
+- **左栏 · 提示词**：写白话，或直接贴一串 tag（锻造台铸好的那串粘过来也一样）；正向 / 负向都在这里改。
+- **中栏 · 参考样式**：一份一份的样式预设（服务端 `/tagger/api/styles` 提供），选中一个就当当前提示词的参考样式。样式是「画风 / 光感 / 完成度」这种成套写法，和逐个补 tag 是两条路。
+- **右栏 · 生成结果**：投出去的任务与产物图排在这里，同一组提示词连着改几版能直接比。
+
+打开方式：浏览器访问 `http://127.0.0.1:7789/`（根路径就是工作台，`/studio` 是它的别名）。三个页面各管一段，别混：
+
+| 页面 | 管什么 |
+| --- | --- |
+| `/` = `/studio`（三栏工作台，默认页） | 一屏写完提示词、套样式、顺手看图；右上角「设置」里填 LLM key 与 ComfyUI 目录 |
+| `/panel`（锻造台） | 白话 → tag：锻造、精修、投递、设置都在这儿 |
+| `/gallery`（姿势画廊） | 挑姿势拿该补的 tag，不做骨架控制 |
 
 ## 三道本地后处理
 

@@ -36,6 +36,7 @@ HTTP/MCP 的逐条参数与示例不在这里，看 [`API.md`](./API.md)。
 | `lib/config.js` | 默认配置与归一化（`DEFAULTS` + `normalize`） |
 | `lib/poses.js` | 姿势目录、缩略图与画廊分组（`createPoseCatalog` / `poseImage` / `poseGallery`） |
 | `lib/pose-tags.js` | 姿势 → tag 的纯映射表：`ANGLE_TAGS` / `CATEGORY_TAGS` / `NAME_HINTS` / `SET_TAGS` + `tagsForPose`（不读盘、不查词表，映射表里的词都在 `data/danbooru` 核对过） |
+| `lib/styles.js` | 参考样式预设（`/studio` 中栏）：`STYLE_GROUPS`（五个分组）/ `STYLES`（卡片 `{ id, title, group, accent, note, tags }`）/ `listStyles` / `styleById` / `tagsOfStyles` / `mergeStylePrompt`。纯数据 + 纯函数，零依赖无 IO；每个 tag 都在 `data/danbooru` 核对过，只放画风 / 光感 / 构图词（要能进公开版） |
 | `server/standalone.mjs` | 独立 HTTP 服务入口（web 版）：起进程、挂 `/tagger/api` 路由、托管 `/public` |
 | `server/shims.mjs` | **纯 Cordis 生命周期垫片**：`createContext` + 8 个传输层名字再导出，≤12KB（有测试护栏） |
 | `lib/cordis/host.js` | 独立模式的 ctx 装配与织入：llm / webServer / tools 三个传输层的实现正文 |
@@ -168,6 +169,24 @@ tagsForPose({ base, code, name, category, angle, set })
 动态 import 失败 —— 这条路径不让整个 handlers 跟着崩，文件到位后下一次请求就能用，不用重启）。
 
 `launchDir` 仍取自 `config.comfy.launchDir`，所以 §9 的最小 ctx 不受影响。
+### 样式预设与 `/studio`（`lib/styles.js`）
+
+`GET /styles` 与 `GET /styles/*` 两个都是纯读，数据全部来自 `lib/styles.js` 的 `STYLES`，不读盘也不写盘：
+
+```js
+listStyles()                     // -> { groups: [{ key, label, note }], styles: [{ id, title, group, accent, note, tags }] }
+styleById(id)                    // -> 单条 | null（handlers 拿 null 回 404 no-style）
+tagsOfStyles(ids, { current })   // -> 去重后的 tag 清单（前端与服务端同一份口径）
+mergeStylePrompt(ids, text)      // -> 把选中的样式拼进提示词
+```
+
+handler 侧只做三件事：`groups` 原样全出；`styles` 按 `group`（小写全等）与 `q`（id / title / note / tags / cn 子串）过滤；
+每条再用 `rt.tags.canonicalizeMany()` 补一列与 `tags` 等长的 `cn`（对不上是空串）。返回形状 `{ ok, groups, styles, total }` 与
+`{ ok, style }`；模块缺失回 503 `styles-unavailable`（动态 import，缺席不影响其它路由）。
+
+`GET /studio` 是纯静态 HTML 页面：`server/standalone.mjs` 里 `registerHtmlPage("/studio", studioHtml)`，每次读盘、
+`no-store`、只认 GET/HEAD（否则 405 `method-not-allowed`），读不到 `server/public/studio.html` 就退回信息页。
+它不在 `/tagger/api` 下，也不经过 `lib/routes.js`。
 ## 5. 二次精修契约（`lib/refine.js`）
 
 ```js

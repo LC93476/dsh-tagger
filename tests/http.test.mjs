@@ -829,4 +829,80 @@ test('GET /pose-thumb 与 GET /health：脏 id 回 404，version 跟着根 packa
   })
 })
 
+test('GET /styles：五组齐全，total 与 styles.length 一致，cn 与 tags 一一对应', async t => {
+  const styleMod = await import('../lib/styles.js').catch(() => null)
+  if (styleMod === null) {
+    t.skip('lib/styles.js 还没落盘，/styles 暂时回 503')
+    return
+  }
+  await withServer({}, async ({ base }) => {
+    const list = await getJson(base + '/styles')
+    assert.equal(list.status, 200)
+    assert.equal(list.body.ok, true)
+    assert.equal(list.body.groups.length, 5)
+    for (const group of list.body.groups) {
+      assert.equal(typeof group.key, 'string')
+      assert.equal(typeof group.label, 'string')
+      assert.equal(typeof group.note, 'string')
+    }
+    assert.ok(Array.isArray(list.body.styles))
+    assert.equal(list.body.total, list.body.styles.length)
+    assert.ok(list.body.styles.length >= 30, '样式卡片至少 30 张，实际 ' + list.body.styles.length)
+    for (const style of list.body.styles) {
+      assert.equal(typeof style.id, 'string')
+      assert.ok(Array.isArray(style.tags) && style.tags.length > 0, style.id + ' 的 tags 不能为空')
+      assert.equal(style.cn.length, style.tags.length, style.id + ' 的 cn 必须与 tags 等长')
+      for (const name of style.cn) assert.equal(typeof name, 'string')
+    }
+  })
+})
+
+test('GET /styles?group 与 ?q：只留该组，groups 仍全量', async t => {
+  const styleMod = await import('../lib/styles.js').catch(() => null)
+  if (styleMod === null) {
+    t.skip('lib/styles.js 还没落盘，/styles 暂时回 503')
+    return
+  }
+  await withServer({}, async ({ base }) => {
+    const all = await getJson(base + '/styles')
+    const target = all.body.groups[0].key
+    const filtered = await getJson(base + '/styles?group=' + encodeURIComponent(target))
+    assert.equal(filtered.status, 200)
+    assert.equal(filtered.body.ok, true)
+    assert.equal(filtered.body.groups.length, 5, 'group 过滤不影响 groups')
+    assert.equal(filtered.body.total, filtered.body.styles.length)
+    assert.ok(filtered.body.styles.length > 0)
+    for (const style of filtered.body.styles) assert.equal(style.group, target)
+    assert.ok(filtered.body.total < all.body.total, '过滤后应该比全量少')
+
+    const sample = all.body.styles[0]
+    const hit = await getJson(base + '/styles?q=' + encodeURIComponent(sample.title))
+    assert.equal(hit.status, 200)
+    assert.ok(hit.body.styles.some(style => style.id === sample.id), 'q 要能在 title 里匹配')
+    assert.equal(hit.body.total, hit.body.styles.length)
+  })
+})
+
+test('GET /styles 单条：已知 id 回 style，未知 id 404 no-style', async t => {
+  const styleMod = await import('../lib/styles.js').catch(() => null)
+  if (styleMod === null) {
+    t.skip('lib/styles.js 还没落盘，/styles 暂时回 503')
+    return
+  }
+  const sample = styleMod.STYLES[0]
+  await withServer({}, async ({ base }) => {
+    const one = await getJson(base + '/styles/' + encodeURIComponent(sample.id))
+    assert.equal(one.status, 200)
+    assert.equal(one.body.ok, true)
+    assert.equal(one.body.style.id, sample.id)
+    assert.deepEqual(one.body.style.tags, sample.tags)
+    assert.equal(one.body.style.cn.length, one.body.style.tags.length)
+
+    const missing = await getJson(base + '/styles/definitely-not-a-style')
+    assert.equal(missing.status, 404)
+    assert.equal(missing.body.ok, false)
+    assert.equal(missing.body.error, 'no-style')
+  })
+})
+
 

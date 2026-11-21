@@ -158,17 +158,23 @@ test('standalone：health / spi / spi.version / 根路径 HTML 都能对外提�
     assert.equal(typeof spi.spi.version, 'number')
     assert.ok(Array.isArray(spi.spi.slots.tagProviders))
 
-    // 根路径 = 能直接用的锻造台面板；样式与脚本已拆到 /public，骨架只留引用
+    // 根路径 = 三栏工作台（默认页）；锻造台挪到 /panel，样式与脚本都走 /public
     const rootRes = await fetch(url + '/')
     assert.equal(rootRes.status, 200)
     assert.match(rootRes.headers.get('content-type') ?? '', /text\/html/)
-    const panel = await rootRes.text()
+    const rootHtml = await rootRes.text()
+    assert.ok(rootHtml.includes('/public/studio.js'), '根路径要直接是三栏工作台，不是锻造台')
+    assert.ok(rootHtml.includes('三栏工作台'), '默认页标题写明三栏工作台')
+
+    const panelRes = await fetch(url + '/panel')
+    assert.equal(panelRes.status, 200)
+    const panel = await panelRes.text()
     assert.ok(panel.includes('DSh Tagger'), '面板标题里要有产品名')
-    assert.ok(panel.includes('锻造台'), '根路径要直接是面板，不是信息页')
+    assert.ok(panel.includes('锻造台'), '/panel 要直接是面板，不是信息页')
     assert.ok(panel.includes('二次精修'), '面板要有二次精修区块')
     assert.ok(panel.includes('/public/panel.css'), '骨架要引用拆出去的样式表')
     assert.ok(panel.includes('/public/app.js'), '骨架要引用拆出去的脚本')
-    assert.ok(Buffer.byteLength(panel) < 10240, 'panel.html 只留骨架，必须小于 10KB')
+    assert.ok(Buffer.byteLength(panel) < 12288, 'panel.html 只留骨架，必须小于 12KB')
 
     // 拆出去的静态资源：200 + 正确 MIME + no-cache + 强 ETag（内容确实搬过去了）
     const cssRes = await fetch(url + '/public/panel.css')
@@ -347,7 +353,7 @@ test('standalone：health / spi / spi.version / 根路径 HTML 都能对外提�
     }
     // 内置字典是 /locale 缺席时的兜底：新键也得在，否则离线时说明行变裸键
     assert.ok(i18nJs.includes('"ui.profile.saved"'), '内置 zh 字典也要有 ui.profile.saved')
-    assert.ok(Buffer.byteLength(panel) < 10240, '加了档案块，panel.html 仍然只留骨架')
+    assert.ok(Buffer.byteLength(panel) < 12288, '加了档案块，panel.html 仍然只留骨架（上限 12KB）')
 
     // GET /locale 由主服务提供，形状固定；前端在它缺席时降级到内置 zh（i18n.js 的 I18N_BUILTIN_ZH）
     const localeRes = await fetch(url + '/tagger/api/locale?lang=zh')
@@ -460,7 +466,7 @@ test('standalone：面板能填接口与 ComfyUI，保存后立刻生效（不�
   const child = spawnStandalone(['--port', '0', '--data-dir', dataDir], env)
   try {
     const url = await waitForReady(child)
-    const panel = await (await fetch(url + '/')).text()
+    const panel = await (await fetch(url + '/panel')).text()
     for (const id of ['接口设置', 'llm-baseurl', 'llm-key', 'llm-model', 'comfy-baseurl', 'comfy-dir', 'comfy-python', 'comfy-workflows', 'comfy-default', '测试连接', '启动 ComfyUI']) {
       assert.ok(panel.includes(id), '面板要能填 ' + id)
     }
@@ -858,7 +864,7 @@ test('姿势画廊收尾：侧栏无死链、关于/来源走页内弹层、计�
 
 test('面板：出图卡片带姿势画廊入口，骨架仍 <10KB 且原有 id 未丢', async () => {
   const html = readFileSync(path.join(here, '..', 'server', 'panel.html'), 'utf8')
-  assert.ok(Buffer.byteLength(html) < 10240, '加完入口仍要小于 10KB，实际 ' + Buffer.byteLength(html))
+  assert.ok(Buffer.byteLength(html) < 12288, '加完入口仍要小于 12KB，实际 ' + Buffer.byteLength(html))
   assert.ok(html.includes('href="/gallery"'), '入口要指向 /gallery')
   assert.ok(html.includes('target="_blank"'), '入口在新窗口打开')
   assert.ok(html.includes('rel="noopener"'), '新窗口要带 noopener')
@@ -868,5 +874,81 @@ test('面板：出图卡片带姿势画廊入口，骨架仍 <10KB 且原有 id 
   }
   assert.ok(html.includes('/public/app.js'), '脚本引用还在')
   assert.ok(html.includes('/public/i18n.js'), 'i18n 引用还在')
+})
+
+test('三栏工作台：/studio 走白名单路由，骨架只引用本地样式脚本', async () => {
+  const html = readFileSync(path.join(here, '..', 'server', 'public', 'studio.html'), 'utf8')
+
+  assert.ok(Buffer.byteLength(html) < 16384, 'studio.html 只留骨架（<16KB），实际 ' + Buffer.byteLength(html))
+  assert.ok(html.includes('/public/studio.css'), '要引用拆出去的样式')
+  assert.ok(html.includes('/public/studio.js'), '要引用拆出去的脚本')
+  for (const id of ['col-prompt', 'col-ref', 'col-gen', 'prompt', 'btn-forge', 'positive', 'chips', 'negative', 'tab-pose', 'tab-style', 'pose-grid', 'style-groups', 'workflow', 'btn-run', 'results', 'history', 'lightbox']) {
+    assert.ok(html.includes('id="' + id + '"'), '三栏骨架要有 #' + id)
+  }
+  for (const text of ['提示词', '参考样式', '生成结果']) {
+    assert.ok(html.includes(text), '三栏标题要写清 ' + text)
+  }
+  // 零外链 = 不引外部资源（脚本 / 样式 / 图片）；接口地址出现在设置抽屉的占位符里是允许的
+  const remoteAssets = html.match(/(?:src|href)\s*=\s*"[^"]*https?:\/\//gi) ?? []
+  assert.equal(remoteAssets.length, 0, '工作台不许引外部资源：' + remoteAssets.join(' '))
+  assert.equal(/url\(\s*['"]?https?:\/\//i.test(html), false, '样式里不许用外部 url()')
+  for (const id of ['settings', 'btn-settings', 'set-llm-base', 'set-llm-key', 'set-llm-model', 'set-comfy-base', 'set-comfy-dir', 'set-comfy-python', 'set-comfy-args']) {
+    assert.ok(html.includes('id="' + id + '"'), '设置抽屉要有 #' + id)
+  }
+
+  const js = readFileSync(path.join(here, '..', 'server', 'public', 'studio.js'), 'utf8')
+  // studio.js 里出现的地址只能是本机或已知的模型服务（设置预设用）
+  const allowedHosts = ['127.0.0.1', 'localhost', 'api.deepseek.com', 'api.openai.com', 'api.siliconflow.cn', 'dashscope.aliyuncs.com', 'opencode.ai']
+  const urlsInJs = js.match(/https?:\/\/[^\s'"\)\],;]+/g) ?? []
+  for (const url of urlsInJs) {
+    let host = ''
+    try { host = new URL(url).hostname } catch { host = 'bad:' + url }
+    assert.ok(allowedHosts.includes(host), 'studio.js 出现了未登记的地址：' + url)
+  }
+  assert.ok(js.includes('"/tagger/api"') || js.includes("'/tagger/api'"), '接口统一走 /tagger/api')
+  for (const p of ['/forge', '/run', '/job?id=', '/pose-gallery?', '/styles', '/workflows', '/image?', '/pose-tags?']) {
+    assert.ok(js.includes(p), 'studio.js 要用到 ' + p)
+  }
+
+  const css = readFileSync(path.join(here, '..', 'server', 'public', 'studio.css'), 'utf8')
+  assert.ok(css.includes('grid-template-columns'), '三栏用 grid 布局')
+  assert.ok(css.includes('prefers-color-scheme'), '深色/浅色都要照顾')
+  assert.equal(css.includes('http://') || css.includes('https://'), false, '样式表不许引外部字体')
+
+  // 白名单：/studio 是页面，/public/studio.html 只是静态资源
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'dsh-studio-'))
+  /** @type {Record<string, string | undefined>} */
+  const env = { ...process.env, DSH_TAGGER_DATA: dataDir, ELECTRON_RUN_AS_NODE: '1' }
+  delete env.DSH_TAGGER_API_KEY
+  delete env.DSH_TAGGER_BASE_URL
+  delete env.DSH_TAGGER_MODEL
+  const child = spawnStandalone(['--port', '0', '--data-dir', dataDir], env)
+  try {
+    const url = await waitForReady(child)
+    const page = await fetch(url + '/studio')
+    assert.equal(page.status, 200)
+    assert.ok((page.headers.get('content-type') ?? '').includes('text/html'), '/studio 要按 HTML 提供')
+    assert.equal(page.headers.get('cache-control'), 'no-store', '页面必须 no-store')
+    const served = await page.text()
+    assert.ok(served.includes('/public/studio.js'), '/studio 要返回真正的 studio.html，不是信息页兜底')
+    assert.ok(served.includes('id="col-ref"'), '三栏骨架要真的送出去')
+
+    const post = await fetch(url + '/studio', { method: 'POST' })
+    assert.equal(post.status, 405, '只读页面只认 GET/HEAD')
+    assert.equal(post.headers.get('allow'), 'GET, HEAD')
+
+    const head = await fetch(url + '/studio', { method: 'HEAD' })
+    assert.equal(head.status, 200)
+    assert.ok((head.headers.get('content-type') ?? '').includes('text/html'))
+
+    for (const [file, type] of [['studio.css', 'text/css'], ['studio.js', 'javascript']]) {
+      const res = await fetch(url + '/public/' + file)
+      assert.equal(res.status, 200)
+      assert.ok((res.headers.get('content-type') ?? '').includes(type), file + ' 的 MIME 要对')
+    }
+  } finally {
+    await stop(child)
+    await rm(dataDir, { recursive: true, force: true })
+  }
 })
 

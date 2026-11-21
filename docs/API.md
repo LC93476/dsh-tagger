@@ -11,6 +11,8 @@
 | GET | `/state` | 面板启动一次性要的全部状态：`{ config, purge, comfy, workflows, workflowsError?, history }`（**没有 `ok` 字段**，出错看 `workflowsError` 与 `comfy.ok`） |
 | GET/POST | `/config` | GET 读配置视图 → `{ ok: true, config }`（**配置包在 `config` 里，不是裸对象**）；POST `{ patch }` 写持久化覆盖并热应用 → `{ ok: true, config }`。改 `forge.profile` 即可切换模型档案（见下文「模型档案」） |
 | GET | `/profiles` | 模型档案清单与当前生效值：`{ profiles: [{ id, title, note, style, quality, qualityTags, order }], current: { id, title, note, style, quality, qualityTags, order, controlled } }`（`ok: true`；`controlled: true` 表示质量词与词序由档案接管，改配置无效） |
+| GET | `/styles` | 参考样式预设（`/studio` 中栏的卡片）：`?group=look&q=胶片`；`groups` 恒全量，`styles` 按分组 / 关键词筛。见下文「样式预设」 |
+| GET | `/styles/{id}` | 单个样式：`{ ok: true, style }`；没有这个 id 回 404 `no-style`（路由是通配 `/styles/*`，id 先 URL 解码、尾部斜杠忽略） |
 | GET/POST | `/purge` | GET 读破甲档位与系统提示词预览；POST `{ purge: { enabled, level, extraDirectives } }` |
 | GET | `/models?provider=` | 该 provider 可用模型列表 |
 | POST | `/probe` | LLM 连通性探针，返回逐 chunk 摘要（`{ ok, args, chunks, capped }`）；整条流 30s 上限、最多收 256 条 chunk，超了置 `capped: true` 提前收尾 |
@@ -42,6 +44,7 @@
 | GET/HEAD | `/public/panel.css`、`/public/api.js`、`/public/state.js`、`/public/app.js`（Phase 7 后还有 `render.js` `settings.js` `history.js`） | 面板静态资源，`Cache-Control: no-cache` + 强 ETag，可 304 |
 | GET/HEAD | `/about` | 信息页（健康状态 / 数据目录 / 接口清单），`no-store` |
 | GET/HEAD | `/gallery` | 姿势画廊页面（`server/public/gallery.html`），`no-store`；非 GET/HEAD 回 405 `method-not-allowed`。是这个页面自己的导航条上的入口，面板「出图」卡右上角也有「姿势画廊 ↗」 |
+| GET/HEAD | `/studio` | 三栏工作台页面（`server/public/studio.html`），`no-store`；非 GET/HEAD 回 405 `method-not-allowed`。读不到 HTML 时退回信息页，服务不报错 |
 
 `/public/*` 的缓存策略：**`no-cache` + 强 ETag**（`"<size 十六进制>-<mtimeMs 十六进制>"`）。
 浏览器可以留副本，但每次刷新都带 `If-None-Match` 复验：没改 → `304` 空 body；改了（size 或 mtime 变）→
@@ -188,6 +191,43 @@ curl -s -X POST http://127.0.0.1:PORT/tagger/api/config \
   -H 'content-type: application/json' \
   -d '{"patch":{"forge":{"profile":"pony"}}}'
 ```
+
+### 样式预设（`GET /styles`、`GET /styles/{id}`）
+
+`/studio` 中栏的卡片吃这两个接口。预设是**纯数据**（`lib/styles.js`，零依赖、无 IO）：画风质感 / 光照 / 场景 / 镜头构图 / 情绪氛围
+五组，一张卡是一串成套的词；只放画风、光感与构图这类词，不放人群与露骨词 —— 这个库要能进公开版。
+
+```bash
+curl -s 'http://127.0.0.1:PORT/tagger/api/styles?group=look&q=胶片'
+curl -s 'http://127.0.0.1:PORT/tagger/api/styles/film-noir-look'
+```
+
+```js
+{ ok: true, total: 1,
+  groups: [ { key: 'look',  label: '画风质感', note: '同一张图换成另一种画法：线条、上色、介质感' },
+            { key: 'light', label: '光照',     note: '光从哪来、硬还是软，决定画面情绪的一半' } ],   // 恒全量，不受 group / q 影响
+  styles: [ { id: 'film-noir-look', title: '黑白片', group: 'look', accent: 'slate',
+              note: '黑白高反差加胶片颗粒，像老式黑色电影的一帧',
+              tags: [ 'greyscale', 'high_contrast', 'film_grain' ],
+              cn:   [ '灰度', '高对比度', '胶片颗粒' ] } ] }
+```
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `group` | `""`（全部） | 分组 key：`look` / `light` / `scene` / `camera` / `mood`；与卡片的 `group` 小写全等比较，没有 `all` 这种通配（要全部就别传） |
+| `q` | `""`（全部） | 关键词，小写后子串匹配 `id` / `title` / `note` / `tags` / `cn` —— 搜中文也能中 |
+
+`GET /styles/{id}` 回 `{ ok: true, style: { …与上表里的单条同形… } }`。
+
+- `groups[]` 是 `{ key, label, note }`，**永远全量**，不跟着过滤条件变（前端的顶部分组条不会跳）。
+- `styles[].tags` 与 `styles[].cn` **等长同序**：`cn[i]` 就是 `tags[i]` 的中文；词库里对不上是空串，标签索引没就绪时整列都是空串（前端自己隐藏中文，别当错误）。
+- `accent` 只是卡片左侧色条的取值（`indigo` / `amber` / `teal` / `rose` / `slate`），不进提示词。
+- 预设只回答「串里该多带哪几个词」：不替你改权重、不覆盖你手写的部分，怎么拼由调用方决定（`lib/styles.js` 另提供 `mergeStylePrompt` / `tagsOfStyles` 这两个纯函数）。
+
+| 状态码 | `error` | 什么时候 |
+| --- | --- | --- |
+| 404 | `no-style` | `/styles/{id}` 找不到这个 id（或 id 为空串） |
+| 503 | `styles-unavailable` | `lib/styles.js` 缺席时动态 import 失败（这两个接口不让整个 handlers 跟着崩，文件到位后下一次请求就能用） |
 ## `POST /refine`
 
 ```bash
