@@ -161,6 +161,38 @@ LINE_RULES.set('lib/pose-tags.js', [
   ],
 ])
 
+// 服装 / 人像映射表：公开版的 SFW 词表把内衣、泳装、蕾丝那批词也过滤掉了，
+// 映射表若还产出它们，/ref-tags 的 chips 会一片「不在库里」。这里整体换成库里真有的近义词。
+LINE_RULES.set('lib/ref-tags.js', [
+  ["  lace: ['lace'],", "  lace: ['frills'],"],
+  ["  camisole: ['camisole'],", "  camisole: ['tank_top'],"],
+  ["  corset: ['corset'],", "  corset: ['leotard'],"],
+  ["  sleeveless: ['sleeveless'],", "  sleeveless: ['sleeveless_dress'],"],
+  ["  briefs: ['panties'],", "  briefs: ['underwear'],"],
+  ["  stockings: ['thighhighs'],", "  stockings: ['pantyhose'],"],
+  ["  bra: ['bra'],", "  bra: ['sports_bra'],"],
+  ["  swimsuit: ['swimsuit'],", "  swimsuit: ['one-piece_swimsuit'],"],
+  ["  lingerie: ['lingerie'],", "  lingerie: ['negligee'],"],
+  ["  蕾丝: ['lace'],", "  蕾丝: ['frills'],"],
+  ["  吊带衫: ['camisole'],", "  吊带衫: ['tank_top'],"],
+  ["  长筒袜: ['thighhighs'],", "  长筒袜: ['pantyhose'],"],
+  ["  长筒丝袜: ['thighhighs'],", "  长筒丝袜: ['pantyhose'],"],
+  ["  束腰胸衣: ['corset'],", "  束腰胸衣: ['leotard'],"],
+  ["  束身衣: ['corset'],", "  束身衣: ['leotard'],"],
+  ["  文胸: ['bra'],", "  文胸: ['sports_bra'],"],
+  ["  内裤: ['panties'],", "  内裤: ['underwear'],"],
+  ["  泳衣: ['swimsuit'],", "  泳衣: ['one-piece_swimsuit'],"],
+  ["  lace: '蕾丝',", "  // 公开版：lace 归到 frills（SFW 词表里没有 lace）"],
+  ["  camisole: '吊带衫',", "  // 公开版：camisole 归到 tank_top"],
+  ["  corset: '束腰胸衣',", "  leotard: '连体紧身衣',"],
+  ["  sleeveless: '无袖',", "  sleeveless_dress: '无袖连衣裙',"],
+  ["  panties: '内裤',", "  // 公开版：panties 归到 underwear"],
+  ["  thighhighs: '长筒袜',", "  // 公开版：thighhighs 归到 pantyhose"],
+  ["  bra: '文胸',", "  // 公开版：bra 归到 sports_bra"],
+  ["  swimsuit: '泳衣',", "  'one-piece_swimsuit': '连体泳衣',"],
+  ["  lingerie: '情趣内衣',", "  negligee: '睡裙',"],
+])
+
 const BLOCK_RULES = new Map([
   // rules.js 的两段表（上下位对、精确桶的「性相关细节」整段）逐行写着露骨词，
   // 整行删会把数组 / 对象结构改坏，所以整块精确替换成不含露骨词的等价结构。
@@ -171,7 +203,7 @@ const BLOCK_RULES = new Map([
     ],
     [
       "  sex: 'sexual', vaginal: 'sexual', anal: 'sexual', oral: 'sexual', fellatio: 'sexual',\n  paizuri: 'sexual', handjob: 'sexual', footjob: 'sexual', masturbation: 'sexual',\n  fingering: 'sexual', cunnilingus: 'sexual', missionary: 'sexual',\n  doggystyle: 'sexual', cowgirl_position: 'sexual', reverse_cowgirl_position: 'sexual',\n  girl_on_top: 'sexual', standing_sex: 'sexual', squatting_sex: 'sexual',\n  sex_from_behind: 'sexual', penis: 'sexual', pussy: 'sexual',\n  vagina: 'sexual', anus: 'sexual', clitoris: 'sexual', precum: 'sexual',\n  cum: 'sexual', cum_in_pussy: 'sexual', cum_in_mouth: 'sexual', cum_overflow: 'sexual',\n  cum_on_breasts: 'sexual', cum_on_body: 'sexual', cum_on_hair: 'sexual',\n  cum_on_tongue: 'sexual', cum_on_stomach: 'sexual', cum_on_chest: 'sexual',\n  cum_string: 'sexual', facial: 'sexual', orgasm: 'sexual', after_orgasm: 'sexual',\n  after_sex: 'sexual', nipples: 'sexual', areolae: 'sexual', labia: 'sexual',\n  pubic_hair: 'sexual', nude: 'sexual', completely_nude: 'sexual', bottomless: 'sexual',\n  spread_pussy: 'sexual', penis_in_pussy: 'sexual', penis_in_ass: 'sexual',\n  exposed_breasts: 'sexual', exposed_pussy: 'sexual', sexually_suggestive: 'sexual',\n  butt_grab: 'sexual', saliva: 'sexual', foreplay: 'sexual', wet: 'sexual', steam: 'sexual',",
-      "  // 公开版不含成人向细节词表（部位 / 行为 / 体液）：完整版这一段逐词分桶，\n  // 公开版按「按本机词表直写」处理，不内置这份词表。\n  sex: 'sexual', oral: 'sexual', missionary: 'sexual', doggystyle: 'sexual',\n  sex_from_behind: 'sexual', against_wall: 'pose', facial: 'sexual', nude: 'sexual',\n  completely_nude: 'sexual', butt_grab: 'sexual', saliva: 'sexual',"
+      "  // 公开版不含成人向细节词表（部位 / 行为 / 体液）：完整版这一段逐词分桶，\n  // 公开版按「按本机词表直写」处理，不内置这份词表。\n  sex: 'sexual', oral: 'sexual', missionary: 'sexual', doggystyle: 'sexual',\n  sex_from_behind: 'sexual', facial: 'sexual', nude: 'sexual',\n  completely_nude: 'sexual', butt_grab: 'sexual', saliva: 'sexual',"
     ]
   ]],
   ['lib/purge.js', [
