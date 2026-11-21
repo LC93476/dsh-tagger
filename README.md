@@ -220,7 +220,7 @@ npm run pack:inject    # → dist/dsh-tagger-inject-<版本>/ 与同名 zip（�
 npm run publish:lite   # 生成公开版到 ../DSh tagger-lite（--dst / --dry）
 ```
 
-便携包里是「能独立起 web 服务」的全部（`bin/ index.js lib/ server/ data/ locale/` 加文档与部署脚本），不带 `tests/`、`scripts/`（只带 `scripts/win`）、`public-src/`。公开版由 `scripts/release/make-public.mjs` 按红线裁出来；要把私货提示词与词表注入回去，用 `scripts/release/inject-private.mjs`（`--dry` 只列表、`--check` 比差异、`--verify` 注入后自检、`--restore` 回滚）。
+便携包里是「能独立起 web 服务」的全部（`bin/ index.js lib/ server/ data/ locale/` 加文档与部署脚本），连开箱入口也一起带上：`start.cmd`、`start.sh`、`start-tagger.cmd`、`start-tagger-hidden.vbs`、`stop-tagger.cmd`、`bin/tagger.mjs`、`scripts/setup.mjs`（首次向导）与 `scripts/win/stop-tagger.cmd`；不带 `tests/`、其余 `scripts/`、`public-src/`。文本类条目走 DEFLATE，0.2.0 的 zip 从 21.5 MB 降到约 5.8 MB（压缩率 27%），解开后内容与目录一一对应（`MANIFEST.txt` 存 sha256 与字节数）。公开版由 `scripts/release/make-public.mjs` 按红线裁出来；要把私货提示词与词表注入回去，用 `scripts/release/inject-private.mjs`（`--dry` 只列表、`--check` 比差异、`--verify` 注入后自检、`--restore` 回滚）。
 
 生成公开版时会顺手把 `package.json` 里指向被裁文件的 scripts 键删掉（`pack:inject`、`publish:lite`——它们依赖的 `pack-inject.mjs` / `make-public.mjs` 不进公开版）。判断依据是磁盘事实：scripts 里每个 `node <文件>` 目标在输出目录里不存在就删该键，所以公开版自己跑 `npm run check:layout` 也是绿的。
 

@@ -16,7 +16,8 @@ HTTP/MCP 的逐条参数与示例不在这里，看 [`API.md`](./API.md)。
 | `index.js` | 独立服务装配入口：`createRuntime(ctx, rawConfig)` 造运行时、`createHandlers(rt)` 出 HTTP 路由表；`server/standalone.mjs` 把路由挂到 `/tagger/api`（旧前缀 `/prompt-forge/api` 同时注册） |
 | `lib/cordis/adapter.js` | 适配层（日志 / 连接 / 最小 ctx）：`createLogger` / `normalizeBaseUrl` / `apiUrl` / `chatCompletionsUrl` / `modelsUrl` / `clampTimeout` / `llmSettings` / `createContextAdapter`（`server/shims.mjs` 与 `index.js` 共用，端点拼接只此一处） |
 | `lib/cordis/config.js` | `PLUGIN` / `VERSION` / `configView(rt)`（apiKey 只回 `apiKeySet` + `apiKeyHint`）/ `persistPatch(rt, patch)` |
-| `lib/cordis/handlers.js` | `createHandlers(rt)`：HTTP 路由表（`/forge` `/refine` `/run` `/job` `/upload` `/pose-thumb` `/spi` `/config` `/purge` `/state` `/health` `/mcp` 等，逐条见 `docs/API.md`） |
+| `lib/cordis/handlers/` | `createHandlers(rt)`：HTTP 路由表，按域拆开 —— `index.js` 拼接，`shared.js` 是共用适配（冷启动等库、标签中文校对、可选模块动态 import、参考库 id 校验），`system.js`（`/spi` `/locale` `/health` `/state` `/profiles` `/config` `/purge` `/mcp`）、`llm.js`（`/refine` `/models` `/llm/probe` `/probe` `/forge`）、`comfy.js`（`/comfy` `/comfy/launch` `/workflows` `/workflows/import` `/upload` `/run` `/job` `/image`）、`poses.js`（`/poses` `/pose-thumb` `/pose-gallery` `/pose-tags`）、`refs.js`（`/styles` `/styles/*` `/refs` `/ref-image` `/ref-tags`）、`tags.js`（`/tags` `/tags/canonicalize`）；逐条字段见 `docs/API.md` |
+| `lib/cordis/handlers.js` | 门面：只 `export { createHandlers }`（外部 import 路径与签名不变） |
 | `lib/tags.js` | 标签索引**统一入口**（转发层）；实现拆在 `lib/tags/`：`text.js` 纯归一、`loader.js` 读盘/overlay/建索引、`matcher.js` 检索与 canonicalize、`index.js` 懒加载与单例 |
 | `lib/forge.js` | 锻造器：白话 → 调 LLM → 解析 JSON → 词形修复 → 姿势补词 → 去重合序 → 标签串 |
 | `lib/repair.js` | 词形修复：库里不存在的写法按 hyphen / apostrophe / spacing / plural / swap / suggest 阶梯纠回 |

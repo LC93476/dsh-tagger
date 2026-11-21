@@ -183,6 +183,63 @@ test('人像卡：发型名称补发型 tag，同义提示只命中一次', () =
   assert.deepEqual(plain, ['portrait', 'upper_body', 'facing_viewer', 'short_hair'])
 })
 
+test('人像卡：特化发型压掉同族泛称，也压掉跨族的马尾', () => {
+  const portrait = style => tagListFor('portrait', { partition: '正脸参考', hair: '长发', style }).filter(tag => ['low_twintails', 'short_twintails', 'twintails', 'side_ponytail', 'high_ponytail', 'low_ponytail', 'ponytail', 'twin_braids', 'single_braid', 'braid', 'double_bun', 'hair_bun'].includes(tag))
+
+  assert.deepEqual(portrait('低位双马尾'), ['low_twintails'], '低位双马尾不该再补 twintails / ponytail')
+  assert.deepEqual(portrait('低双马尾'), ['low_twintails'])
+  assert.deepEqual(portrait('短双马尾'), ['short_twintails'])
+  assert.deepEqual(portrait('高马尾'), ['high_ponytail'], '高马尾不该再补裸 ponytail')
+  assert.deepEqual(portrait('低位马尾'), ['low_ponytail'])
+  assert.deepEqual(portrait('两侧马尾'), ['twintails'], '两侧马尾是双马尾，不该出 side_ponytail / ponytail')
+  assert.deepEqual(portrait('两个马尾'), ['twintails'])
+  assert.deepEqual(portrait('侧马尾'), ['side_ponytail'], '侧马尾不该再补裸 ponytail')
+  assert.deepEqual(portrait('两条辫子'), ['twin_braids'], '两条辫子不该再补 braid')
+  assert.deepEqual(portrait('单条辫子'), ['single_braid'])
+  assert.deepEqual(portrait('侧编发'), ['single_braid'], '侧编发不该再补 braid')
+  assert.deepEqual(portrait('两个丸子'), ['double_bun'], '两个丸子不该再补 hair_bun')
+  assert.deepEqual(portrait('丸子头'), ['hair_bun'])
+  assert.deepEqual(portrait('麻花辫'), ['braid'])
+  assert.deepEqual(portrait('双马尾'), ['twintails'])
+
+  // 组合串里也一样：低位双马尾 + 空气刘海，只出精确词 + 刘海
+  const combo = tagListFor('portrait', { partition: '正脸参考', hair: '长发', style: '收腰长发・低位双马尾・空气刘海' })
+  assert.deepEqual(combo, ['portrait', 'upper_body', 'facing_viewer', 'very_long_hair', 'low_twintails', 'swept_bangs'])
+})
+
+test('服装卡：中文单字泛称不再误伤（包 / 中长）', () => {
+  const bag = tagListFor('costume', { name: '米色手提包', tags: ['手提包'] })
+  assert.deepEqual(bag, ['bag'])
+
+  const skirtBag = tagListFor('costume', { name: '黑色包臀裙', tags: ['包臀裙'] })
+  assert.equal(skirtBag.includes('bag'), false, '包臀裙不该出 bag')
+  assert.deepEqual(skirtBag, ['pencil_skirt'])
+
+  const puffer = tagListFor('costume', { name: '奶白色面包服', tags: ['面包服'] })
+  assert.equal(puffer.includes('bag'), false, '面包服不该出 bag')
+  assert.deepEqual(puffer, ['down_jacket'])
+
+  const coat = tagListFor('costume', { name: '驼色中长款大衣', tags: ['中长款大衣'] })
+  assert.equal(coat.includes('long_skirt'), false, '中长款大衣不该出 long_skirt')
+  assert.deepEqual(coat, ['coat'])
+
+  assert.deepEqual(tagListFor('costume', { name: '米色中长裙', tags: ['中长裙'] }), ['long_skirt'])
+})
+
+test('服装卡：中文长词优先且区间不重叠，英文连字符归一，pleated 只认裙子', () => {
+  assert.deepEqual(tagListFor('costume', { name: '白色女式衬衫', tags: ['女式衬衫'] }), ['blouse'], '女式衬衫只出 blouse')
+  assert.deepEqual(tagListFor('costume', { name: '蓝色牛仔裤', tags: ['牛仔裤'] }), ['jeans'], '牛仔裤不该再因「牛仔」补 denim')
+  assert.deepEqual(tagListFor('costume', { tags: ['托特包'] }), ['tote_bag'], '托特包不该降级成 bag')
+
+  assert.deepEqual(tagListFor('costume', { keywords: 'white mini-skirt' }), ['miniskirt'], '带连字符也要归一')
+  assert.deepEqual(tagListFor('costume', { keywords: 'polka-dot blouse' }), ['polka_dot', 'blouse'])
+  assert.deepEqual(tagListFor('costume', { keywords: 'polka dot blouse' }), ['polka_dot', 'blouse'])
+
+  assert.deepEqual(tagListFor('costume', { keywords: 'pleated blouse' }), ['blouse'], 'pleated 混了 blouse 就不是裙子')
+  assert.deepEqual(tagListFor('costume', { keywords: 'pleated white skirt' }), ['pleated_skirt'], '明确有 skirt 才给 pleated_skirt')
+  assert.deepEqual(tagListFor('costume', { name: '奶油色百褶衬衫', tags: ['百褶衬衫'] }), ['shirt'], '百褶加衬衫不是百褶裙')
+})
+
 test('真词表：所有产出的 tag 都在 general.jsonl 里且 postCount > 0', t => {
   const dict = readDict()
   if (dict === null) return t.skip('词表不在：' + DICT)
