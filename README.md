@@ -128,7 +128,7 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/<你>/AppData/Local/Programs/DeepSeek Harness/D
 
 运行时探测顺序：`--dict-dir` > `DSH_DANBOORU_DIR` > `DSH_COMFYUI_DATA_DIR` > `~/.dsh-comfyui-workbench/data{,/danbooru}` > **仓库的 `data/danbooru`** > 相邻的 `dsh-comfyui-workbench/data{,/danbooru}` > `<数据目录>/tags`；一条都命中不了才退化成只用 seed + overlay 的 1247 条。
 
-公开版（`dsh-tagger-lite`）发的是**过滤过的 SFW 快照**：生成公开版时 `scripts/tags/filter-dict.mjs` 会把完整快照按 Danbooru 分组（Sex acts / Sexual positions / Nudity / BDSM …）与词条名、别名、备注逐条过一遍，命中的词条整条剔除，只是别名或备注脏的摘掉别名、留着词条；`groups.jsonl` 不进公开版。全量 99447 条过滤后约 97497 条（general 28903 / characters 35325 / copyrights 8400 / artists 24869）。私有仓要自己生成一份 SFW 快照：`node scripts/tags/filter-dict.mjs [--from <源目录>] [--to <目标目录>] [--check]`。
+本仓库是**完整版**，`data/danbooru/` 里就是全量 99447 条（含成人向词条）。另发了 `dsh-tagger-lite` 仓库，带的是**过滤过的 SFW 快照**：生成它时 `scripts/tags/filter-dict.mjs` 会把完整快照按 Danbooru 分组（Sex acts / Sexual positions / Nudity / BDSM …）与词条名、别名、备注逐条过一遍，命中的词条整条剔除，只是别名或备注脏的摘掉别名、留着词条；`groups.jsonl` 不进公开版。全量 99447 条过滤后约 97497 条（general 28903 / characters 35325 / copyrights 8400 / artists 24869）。想自己生成一份 SFW 快照：`node scripts/tags/filter-dict.mjs [--from <源目录>] [--to <目标目录>] [--check]`。
 
 词表装在别处（比如 `D:/QUARK/dsh-comfyui-workbench/data/danbooru`）时，在 `settings.json` 里写 `"tags": { "dataDirs": ["D:/QUARK/dsh-comfyui-workbench/data/danbooru"] }` 即可，不必每次开服务都带环境变量。面板顶部会显示索引条数：`99447` 是真词表，`1247` 说明只读到 seed。
 
