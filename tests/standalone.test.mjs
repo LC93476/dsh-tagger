@@ -14,7 +14,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 import { mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises'
-import { readFileSync, statSync, utimesSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import vm from 'node:vm'
@@ -23,6 +23,26 @@ import { DEFAULTS } from '../lib/config.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const entry = path.join(here, '..', 'server', 'standalone.mjs')
+
+/**
+ * 工作台脚本的全文：studio.js 是薄入口，实现搬到了 studio/*.js。
+ * 断言按「整份源码」写，所以这里拼起来读，别只读入口那一份。
+ * @returns {string}
+ */
+function readStudioSources() {
+  const dir = path.join(here, '..', 'server', 'public')
+  const entryFile = path.join(dir, 'studio.js')
+  /** @type {string[]} */
+  const parts = [readFileSync(entryFile, 'utf8')]
+  try {
+    for (const name of readdirSync(path.join(dir, 'studio')).sort()) {
+      if (name.endsWith('.js')) parts.push(readFileSync(path.join(dir, 'studio', name), 'utf8'))
+    }
+  } catch {
+    // 还没拆模块时只有 studio.js，读不到 studio/ 目录不算错
+  }
+  return parts.join('\n')
+}
 const READY = /STANDALONE_READY url=(\S+)/
 
 /** 等子进程打印 STANDALONE_READY（--port 0 时真实端口只有它知道）。 */
@@ -896,8 +916,8 @@ test('三栏工作台：/studio 走白名单路由，骨架只引用本地样式
     assert.ok(html.includes('id="' + id + '"'), '设置抽屉要有 #' + id)
   }
 
-  const js = readFileSync(path.join(here, '..', 'server', 'public', 'studio.js'), 'utf8')
-  // studio.js 里出现的地址只能是本机或已知的模型服务（设置预设用）
+  const js = readStudioSources()
+  // 工作台脚本里出现的地址只能是本机或已知的模型服务（设置预设用）
   const allowedHosts = ['127.0.0.1', 'localhost', 'api.deepseek.com', 'api.openai.com', 'api.siliconflow.cn', 'dashscope.aliyuncs.com', 'opencode.ai']
   const urlsInJs = js.match(/https?:\/\/[^\s'"\)\],;]+/g) ?? []
   for (const url of urlsInJs) {
@@ -954,7 +974,7 @@ test('三栏工作台：/studio 走白名单路由，骨架只引用本地样式
 
 test('三栏工作台：服装 / 人像参考库页签、底部 dock 与只读接口都在位', async () => {
   const html = readFileSync(path.join(here, '..', 'server', 'public', 'studio.html'), 'utf8')
-  const js = readFileSync(path.join(here, '..', 'server', 'public', 'studio.js'), 'utf8')
+  const js = readStudioSources()
   const css = readFileSync(path.join(here, '..', 'server', 'public', 'studio.css'), 'utf8')
 
   const order = ['tab-pose', 'tab-costume', 'tab-portrait', 'tab-style'].map(id => html.indexOf('id="' + id + '"'))

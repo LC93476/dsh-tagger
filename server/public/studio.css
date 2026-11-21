@@ -212,6 +212,7 @@ button, input, select, textarea { font-family: inherit; font-size: 13px; color: 
 .btn.primary { background: var(--brand); border-color: var(--brand); color: #0b0d12; font-weight: 600; }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn[hidden], .hint[hidden] { display: none; }
 .mini {
   padding: 3px 8px;
   border-radius: var(--r-sm);
