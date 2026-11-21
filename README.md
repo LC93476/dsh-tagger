@@ -163,6 +163,7 @@ ELECTRON_RUN_AS_NODE=1 "C:/Users/<你>/AppData/Local/Programs/DeepSeek Harness/D
 - 主文件四份共 **511** 行：`general-nsfw.jsonl` 154、`pose-view.jsonl` 274、`quality-common.jsonl` 30、`scene-common.jsonl` 53。
 - `data/tags/seed/` 13 份共 **736** 行，只放大词库没有的兜底词，所以和主文件零重复。
 - 合计 17 份 / **1247** 行 / 1247 个 tag（`npm run check:layout` 会核这个数）。
+- 词库版本会显示在 `/studio` 的设置抽屉「词库 · Tag 数据」里：条数 + 是否 SFW。快照 `manifest.json` 写了 `sfw: true` 才认作 SFW 版，否则按「完整词表（含 NSFW 词条）」提示 —— 只是提示，不影响锻造。
 
 改词表之前先看一眼现状：
 
